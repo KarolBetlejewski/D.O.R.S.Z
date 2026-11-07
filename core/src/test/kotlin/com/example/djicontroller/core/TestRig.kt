@@ -1,6 +1,7 @@
 package com.example.djicontroller.core
 
 import com.example.djicontroller.core.control.ControlArbiter
+import com.example.djicontroller.core.fake.FakeCamera
 import com.example.djicontroller.core.fake.FakeClock
 import com.example.djicontroller.core.fake.FakeConnection
 import com.example.djicontroller.core.fake.FakeFlightControl
@@ -8,9 +9,11 @@ import com.example.djicontroller.core.fake.FakeLanding
 import com.example.djicontroller.core.fake.FakeMission
 import com.example.djicontroller.core.fake.FakeStation
 import com.example.djicontroller.core.fake.FakeTelemetry
+import com.example.djicontroller.core.fake.FakeVision
 import com.example.djicontroller.core.fake.InMemoryBreakpointStore
 import com.example.djicontroller.core.fake.RecordingLogger
 import com.example.djicontroller.core.landing.LandingOutcome
+import com.example.djicontroller.core.landing.LandingProcedure
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.core.model.DroneState
@@ -75,6 +78,8 @@ class TestRig(
         returnTimeoutMarginMs = 2_000,
     ),
     landingOutcomes: List<LandingOutcome> = listOf(LandingOutcome.Landed),
+    /** Prawdziwa procedura lądowania zamiast [FakeLanding] (np. LandingPlanner); dostaje gotowe fake'i rigu. */
+    customLanding: (TestRig.() -> LandingProcedure)? = null,
 ) {
     val clock = FakeClock()
     val logger = RecordingLogger()
@@ -88,8 +93,10 @@ class TestRig(
     val breakpoints = InMemoryBreakpointStore()
     val batteryPolicy = BatteryPolicy()
     val safety = SafetySupervisor(scope, telemetry, connection, flight, mission, station, batteryPolicy, logger, clock)
+    val camera = FakeCamera()
+    val vision = FakeVision()
     val orchestrator = CycleOrchestrator(
-        scope, telemetry, connection, flight, mission, station, landing, safety,
+        scope, telemetry, connection, flight, mission, station, customLanding?.invoke(this) ?: landing, safety,
         batteryPolicy, breakpoints, logger, clock, config,
     )
 
