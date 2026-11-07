@@ -11,17 +11,24 @@ import com.example.djicontroller.core.orchestrator.SafetySupervisor
 import com.example.djicontroller.core.port.Clock
 import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.port.LogLevel
-import com.example.djicontroller.core.port.SystemClock
+import com.example.djicontroller.core.diagnostics.FlightTestRunner
+import com.example.djicontroller.core.diagnostics.MarkerHoverTest
+import com.example.djicontroller.core.diagnostics.StickAxisCheck
+import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.logging.FileFlightLogger
 import com.example.djicontroller.logging.LogcatFlightLogger
 import com.example.djicontroller.core.port.ConnectionPort
 import com.example.djicontroller.core.port.StationPort
 import com.example.djicontroller.core.port.TelemetryPort
+import com.example.djicontroller.storage.AppSettings
 import com.example.djicontroller.storage.FileBreakpointStore
+import com.example.djicontroller.vision.CameraCalibration
+import com.example.djicontroller.vision.VisionPipeline
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import java.io.File
 
 /**
  * Ręczne DI: jeden graf obiektów na proces, tworzony w [com.example.djicontroller.PatrolApp].
@@ -29,7 +36,10 @@ import kotlinx.coroutines.SupervisorJob
  */
 class AppContainer(context: Context) {
 
-    val clock: Clock = SystemClock
+    /** `SystemClock.elapsedRealtime()` — wspólny dla kamery, wizji i watchdoga (patrz [ElapsedRealtimeClock]). */
+    val clock: Clock = ElapsedRealtimeClock
+
+    val settings = AppSettings(context)
 
     private val crashLogger = LogcatFlightLogger(LogLevel.ERROR)
 
@@ -46,7 +56,7 @@ class AppContainer(context: Context) {
     val arbiter = ControlArbiter(logger)
 
     // --- Platforma: DJI MSDK (wariant prod) albo symulator (wariant demo) — src/<wariant>/…/BackendFactory.kt
-    val backend: DroneBackend = createDroneBackend(context, appScope, logger, clock, arbiter)
+    val backend: DroneBackend = createDroneBackend(context, appScope, logger, clock, arbiter, settings.stickAxes)
     val connection: ConnectionPort get() = backend.connection
     val telemetry: TelemetryPort get() = backend.telemetry
     val station: StationPort get() = backend.station
@@ -64,11 +74,42 @@ class AppContainer(context: Context) {
     )
     private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
 
+    // --- Wizja (:vision, sekcja 5.4)
+    /** Własna kalibracja kamery: `Android/data/<pakiet>/files/camera_calibration.json` (format: CameraCalibration.toJson). */
+    val calibrationFile = File(context.getExternalFilesDir(null), "camera_calibration.json")
+    val vision = VisionPipeline(appScope, backend.camera, settings.padLayout, loadCalibration(), logger, clock)
+        .also { backend.attachVision(it) }
+
+    /** Klatki zapisywane z Diagnostyki (np. szachownica do kalibracji). */
+    val framesDir = File(context.getExternalFilesDir(null), "frames")
+
+    // --- Testy lotu z ekranu Diagnostyka (F2: R3 i test osi)
+    val flightTests = FlightTestRunner(
+        scope = appScope,
+        flight = backend.flight,
+        telemetry = backend.telemetry,
+        stopEvents = safety.stopEvents,
+        isCycleIdle = { orchestrator.state.value.let { it == CycleState.Ready || it is CycleState.Failure } },
+        logger = logger,
+    )
+    val hoverTest = MarkerHoverTest(flightTests, backend.flight, backend.camera, vision, backend.telemetry, logger, clock)
+    val axisCheck = StickAxisCheck(flightTests, backend.flight, backend.telemetry, logger, clock)
+
+    private fun loadCalibration(): CameraCalibration {
+        CameraCalibration.load(calibrationFile)
+            .onSuccess { custom -> if (custom != null) return custom }
+            .onFailure { e ->
+                logger.system("calibration_invalid", LogLevel.ERROR, mapOf("file" to calibrationFile.path, "error" to e.toString()))
+            }
+        return CameraCalibration.mini4ProDefault()
+    }
+
     /** Uruchamia MSDK, telemetrię, nadzór i zapis telemetrii. Wołać raz z `Application.onCreate`. */
     fun start() {
         logger.system("app_start", fields = mapOf("backend" to backend.name, "log" to fileLogger.file.absolutePath))
         backend.start()
         orchestrator.start()
+        vision.start()
         telemetryRecorder.start(appScope)
     }
 }

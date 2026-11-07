@@ -51,7 +51,7 @@ import java.util.Locale
 
 /** Ekran główny (sekcja 6, projekt D1), orientacja pozioma — podpięty pod ViewModel i kamerę drona. */
 @Composable
-fun PatrolScreen(vm: MainViewModel = viewModel()) {
+fun PatrolScreen(vm: MainViewModel = viewModel(), onOpenDiagnostics: () -> Unit = {}) {
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -69,6 +69,7 @@ fun PatrolScreen(vm: MainViewModel = viewModel()) {
         onResume = vm::resume,
         onReset = vm::reset,
         onStop = vm::stop,
+        onOpenDiagnostics = onOpenDiagnostics,
     )
 }
 
@@ -87,6 +88,7 @@ fun PatrolContent(
     onReset: () -> Unit,
     onStop: () -> Unit,
     debugActions: List<DebugAction> = emptyList(),
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     Box(
         Modifier
@@ -119,6 +121,7 @@ fun PatrolContent(
                 onResume = onResume,
                 onReset = onReset,
                 onStop = onStop,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
@@ -248,6 +251,7 @@ private fun AlarmBanner(text: String) {
 private fun VideoPanel(video: @Composable () -> Unit, state: MainUiState, modifier: Modifier) {
     Panel(modifier) {
         video()
+        if (state.vision != null) VisionOverlay(state.vision, Modifier.fillMaxSize())
         PanelLabel("Obraz z kamery", Modifier.align(Alignment.TopStart))
         if (state.connection !is ConnectionState.Connected) {
             Text(
@@ -350,6 +354,7 @@ private fun BottomBar(
     onResume: () -> Unit,
     onReset: () -> Unit,
     onStop: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val cycle = state.cycle
     Row(
@@ -357,6 +362,12 @@ private fun BottomBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        OutlinedButton(
+            onClick = onOpenDiagnostics,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text("Diagnostyka", fontSize = 12.sp, maxLines = 1)
+        }
         StageChips(cycle.stage, Modifier.weight(1f))
 
         when (cycle) {
@@ -417,7 +428,7 @@ private fun RowScope.ActionButton(text: String, color: Color, onClick: () -> Uni
 
 /** Duży czerwony STOP — zawsze aktywny, bez potwierdzenia (sekcja 5.8). */
 @Composable
-private fun StopButton(onClick: () -> Unit, active: Boolean) {
+internal fun StopButton(onClick: () -> Unit, active: Boolean) {
     Button(
         onClick = onClick,
         shape = CircleShape,

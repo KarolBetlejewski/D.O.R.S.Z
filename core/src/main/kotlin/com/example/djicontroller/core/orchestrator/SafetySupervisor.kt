@@ -27,7 +27,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -76,6 +79,14 @@ class SafetySupervisor(
 
     private var activeFindings: Map<String, SafetyAlarm> = emptyMap()
 
+    private val _stopEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+
+    /**
+     * Każde naciśnięcie STOP (źródło jako wartość). Słuchają go wszystkie mechanizmy sterujące
+     * dronem poza orkiestratorem (testy z ekranu Diagnostyka) — STOP przerywa je natychmiast.
+     */
+    val stopEvents: SharedFlow<String> = _stopEvents.asSharedFlow()
+
     /**
      * Przycisk STOP: natychmiastowy zawis, bez potwierdzenia. Nieblokujące — można wołać z wątku UI.
      * Część synchroniczna (log + dyrektywa) wykonuje się jeszcze przed powrotem z tej funkcji.
@@ -86,6 +97,7 @@ class SafetySupervisor(
     suspend fun stopNow(source: String = "operator") {
         logger.safety("stop", LogLevel.WARN, mapOf("source" to source, "owner" to flight.controlOwner.value))
         directiveChannel.send(SafetyDirective.Hold("STOP ($source)"))
+        _stopEvents.tryEmit(source)
         haltMotion()
     }
 

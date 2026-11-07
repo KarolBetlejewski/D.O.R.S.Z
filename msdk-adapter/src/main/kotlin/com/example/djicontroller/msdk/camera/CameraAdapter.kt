@@ -10,8 +10,10 @@ import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.Clock
 import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.port.LogLevel
+import com.example.djicontroller.msdk.common.asFlow
 import com.example.djicontroller.msdk.common.perform
 import com.example.djicontroller.msdk.connection.SdkInitializer
+import com.example.djicontroller.msdk.connection.whenInitialized
 import dji.sdk.keyvalue.key.GimbalKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.common.ComponentIndexType
@@ -21,11 +23,17 @@ import dji.sdk.keyvalue.value.gimbal.GimbalResetType
 import dji.v5.manager.datacenter.MediaDataCenter
 import dji.v5.manager.interfaces.ICameraStreamManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -38,8 +46,10 @@ import kotlinx.coroutines.flow.shareIn
  *
  * - Podgląd: `putCameraStreamSurface` / `removeCameraStreamSurface` na powierzchni z UI.
  * - Klatki dla :vision: `addFrameListener(…, FrameFormat.NV21, …)` z kolejką o pojemności 1
- *   (najnowsza klatka wypiera starszą). Nasłuch jest aktywny tylko wtedy, gdy ktoś zbiera [frames],
+ *   (najnowsza klatka wypiera starszą), znacznik czasu z [clock] (w aplikacji `SystemClock.elapsedRealtime()`),
+ *   przetwarzanie na `Dispatchers.Default`. Nasłuch jest aktywny tylko wtedy, gdy ktoś zbiera [frames],
  *   bo dekodowanie do NV21 kosztuje CPU.
+ * - Gimbal: `KeyRotateByAngle` (−90° = kamera w dół) i odczyt kąta z `KeyGimbalAttitude`.
  */
 class CameraAdapter(
     private val sdk: SdkInitializer,
@@ -59,7 +69,15 @@ class CameraAdapter(
 
     private data class PreviewTarget(val surface: Surface, val width: Int, val height: Int)
 
+    private val _gimbalPitch = MutableStateFlow<Double?>(null)
+    override val gimbalPitchDeg: StateFlow<Double?> = _gimbalPitch.asStateFlow()
+
     init {
+        sdk.whenInitialized { KeyTools.createKey(GimbalKey.KeyGimbalAttitude, cameraIndex).asFlow() }
+            .onEach { attitude -> _gimbalPitch.value = attitude?.pitch }
+            .catch { e -> logger.system("gimbal_attitude_failed", LogLevel.ERROR, mapOf("error" to e.toString())) }
+            .launchIn(scope)
+
         // Powierzchnia podpięta przed INITIALIZE_COMPLETE zostaje przekazana do SDK, gdy będzie gotowe.
         sdk.initialized
             .filter { it }
@@ -126,6 +144,7 @@ class CameraAdapter(
         }
     }
         .buffer(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+        .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(), replay = 0)
 
     /** Gimbal na −90° (kamera w dół) — `GimbalKey.KeyRotateByAngle`, tryb kąta bezwzględnego. */

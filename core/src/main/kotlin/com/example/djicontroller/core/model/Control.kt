@@ -25,6 +25,45 @@ enum class ControlOwner { NONE, MISSION, VIRTUAL_STICK, AUTO_LANDING }
 data class ControlLoss(val reason: String, val takenOverByRc: Boolean)
 
 /**
+ * Jak osie [Setpoint] trafiają na pola `pitch`/`roll` parametru Virtual Stick.
+ *
+ * Dokumentacja DJI dla trybu VELOCITY: `roll` = prędkość wzdłuż osi X (do przodu w BODY),
+ * `pitch` = prędkość wzdłuż osi Y (w prawo). Ustawienie domyślne to [ROLL_FORWARD];
+ * [PITCH_FORWARD] istnieje na wypadek innego zachowania firmware — rozstrzyga test osi
+ * w symulatorze (ekran Diagnostyka), zanim dron poleci na Virtual Stick.
+ */
+enum class StickAxes { ROLL_FORWARD, PITCH_FORWARD }
+
+/** Stan Virtual Stick do UI i logów (`VirtualStickStateListener.onVirtualStickStateUpdate`). */
+data class VirtualStickStatus(
+    /** `VirtualStickState.isVirtualStickEnable`. */
+    val enabled: Boolean = false,
+    /** `VirtualStickState.isVirtualStickAdvancedModeEnabled`. */
+    val advancedMode: Boolean = false,
+    /** `VirtualStickState.currentFlightControlAuthorityOwner`, np. „MSDK”, „RC”. */
+    val authority: String? = null,
+    /** Pętla wysyłania aplikacji działa. */
+    val loopActive: Boolean = false,
+    /** Ostatnio wysłany punkt zadany (po watchdogu i ograniczeniach). */
+    val lastSent: Setpoint? = null,
+    /** Watchdog wymusił zawis, bo cel nie był odświeżany. */
+    val watchdogHover: Boolean = false,
+    /** Ostatni powód zmiany właściciela sterowania z `onChangeReasonUpdate`. */
+    val lastChangeReason: String? = null,
+    val axes: StickAxes = StickAxes.ROLL_FORWARD,
+)
+
+/** Symulator MSDK (`SimulatorManager`) — test R3 bez śmigieł. */
+data class SimulatorStatus(
+    val enabled: Boolean = false,
+    val location: GeoPoint? = null,
+    val areMotorsOn: Boolean? = null,
+    val isFlying: Boolean? = null,
+    /** Przesunięcie od punktu startowego symulatora (X, Y, Z), m. */
+    val positionM: Triple<Double, Double, Double>? = null,
+)
+
+/**
  * Zadana prędkość w układzie BODY drona dla Virtual Stick w trybie VELOCITY (sekcja 5.6).
  * Osie: do przodu (+), w prawo (+), w górę (+); obrót w prawo (+).
  */

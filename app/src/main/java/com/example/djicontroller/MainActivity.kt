@@ -11,15 +11,21 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.djicontroller.core.logging.system
 import com.example.djicontroller.service.PatrolService
+import com.example.djicontroller.ui.DiagnosticsScreen
 import com.example.djicontroller.ui.PatrolScreen
 import com.example.djicontroller.ui.PatrolTheme
 
@@ -45,7 +51,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PatrolTheme {
-                PatrolScreen()
+                // Jedno Activity, dwa ekrany: główny (D1) i Diagnostyka (F2). Stan przetrwa obrót ekranu.
+                var screen by rememberSaveable { mutableStateOf(AppScreen.MAIN) }
+                BackHandler(enabled = screen == AppScreen.DIAGNOSTICS) { screen = AppScreen.MAIN }
+                when (screen) {
+                    AppScreen.MAIN -> PatrolScreen(onOpenDiagnostics = { screen = AppScreen.DIAGNOSTICS })
+                    AppScreen.DIAGNOSTICS -> DiagnosticsScreen(onBack = { screen = AppScreen.MAIN })
+                }
             }
         }
     }
@@ -87,3 +99,5 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+private enum class AppScreen { MAIN, DIAGNOSTICS }

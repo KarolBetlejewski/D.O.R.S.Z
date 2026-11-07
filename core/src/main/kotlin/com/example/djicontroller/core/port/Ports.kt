@@ -5,12 +5,19 @@ import com.example.djicontroller.core.model.ConnectionState
 import com.example.djicontroller.core.model.ControlLoss
 import com.example.djicontroller.core.model.ControlOwner
 import com.example.djicontroller.core.model.DroneState
+import com.example.djicontroller.core.model.GeoPoint
+import com.example.djicontroller.core.model.MarkerObservation
 import com.example.djicontroller.core.model.MissionPlan
 import com.example.djicontroller.core.model.MissionProgress
 import com.example.djicontroller.core.model.Setpoint
+import com.example.djicontroller.core.model.SimulatorStatus
+import com.example.djicontroller.core.model.StickAxes
 import com.example.djicontroller.core.model.StationCommand
 import com.example.djicontroller.core.model.StationLink
 import com.example.djicontroller.core.model.VideoFrame
+import com.example.djicontroller.core.model.VirtualStickStatus
+import com.example.djicontroller.core.model.VisionFrameResult
+import com.example.djicontroller.core.model.VisionStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -44,11 +51,18 @@ interface FlightControlPort {
     /** Zdarzenia utraty kontroli nad Virtual Stick (np. przejęcie z aparatury, strefa zakazana). */
     val controlLost: Flow<ControlLoss>
 
+    /** Stan Virtual Stick (włączony, tryb zaawansowany, właściciel, ostatni wysłany punkt). */
+    val virtualStick: StateFlow<VirtualStickStatus>
+
     /** `KeyStartTakeoff`. */
     suspend fun takeOff(): CommandResult
 
-    /** `KeyStartAutoLanding` — właściciel sterowania przechodzi na [ControlOwner.AUTO_LANDING]. */
-    suspend fun startAutoLanding(): CommandResult
+    /**
+     * `KeyStartAutoLanding` — właściciel sterowania przechodzi na [ControlOwner.AUTO_LANDING].
+     * Przy [confirmAutomatically] implementacja sama odpowiada `KeyConfirmLanding`, gdy dron zgłosi
+     * `KeyIsLandingConfirmationNeeded` (ochrona lądowania nad płytą stacji, test R5).
+     */
+    suspend fun startAutoLanding(confirmAutomatically: Boolean = true): CommandResult
 
     /** `KeyStopAutoLanding`. */
     suspend fun cancelAutoLanding(): CommandResult
@@ -64,6 +78,9 @@ interface FlightControlPort {
 
     /** Ustawia cel dla pętli Virtual Stick. Bez kolejnego wywołania przez czas watchdoga pętla wysyła [Setpoint.HOVER]. */
     fun setVelocityTarget(setpoint: Setpoint)
+
+    /** Mapowanie osi na `pitch`/`roll` (patrz [StickAxes]). Dozwolone tylko przy wyłączonej pętli. */
+    fun setStickAxes(axes: StickAxes): CommandResult
 
     /**
      * Natychmiastowy zawis niezależnie od tego, co steruje dronem poza misją:
@@ -103,11 +120,46 @@ interface CameraPort {
     /** Najnowsze klatki (kolejka o pojemności 1 — starsze są odrzucane). */
     val frames: Flow<VideoFrame>
 
+    /** Bieżące pochylenie gimbala z `GimbalKey.KeyGimbalAttitude`, stopnie (−90 = kamera w dół); `null` = nieznane. */
+    val gimbalPitchDeg: StateFlow<Double?>
+
     /** `GimbalKey.KeyRotateByAngle` do −90° (kamera w dół). */
     suspend fun pointGimbalDown(): CommandResult
 
     /** Powrót gimbala do pozycji poziomej. */
     suspend fun resetGimbal(): CommandResult
+}
+
+/**
+ * Detekcja markerów ArUco (:vision, sekcja 5.4). Detekcja działa tylko wtedy, gdy ktoś jej
+ * potrzebuje — każdy użytkownik zgłasza się przez [acquire] i oddaje przez [release]
+ * (np. nakładka w UI, test zawisu, procedura lądowania).
+ */
+interface VisionPort {
+    /** Wynik ostatniej przetworzonej klatki; `null` = detekcja wyłączona albo jeszcze brak klatek. */
+    val results: StateFlow<VisionFrameResult?>
+
+    /** Najświeższa obserwacja lądowiska (z [results]); `null` = marker niewidoczny. */
+    val observation: StateFlow<MarkerObservation?>
+
+    /** Kto teraz korzysta z detekcji. Pusty zbiór = detekcja wyłączona. */
+    val users: StateFlow<Set<String>>
+
+    val stats: StateFlow<VisionStats>
+
+    fun acquire(user: String)
+    fun release(user: String)
+    fun resetStats()
+}
+
+/** Symulator MSDK (`SimulatorManager`, wzorzec `SimulatorVM.kt`) — loty testowe bez śmigieł. */
+interface SimulatorPort {
+    val status: StateFlow<SimulatorStatus>
+
+    /** `enableSimulator(InitializationSettings.createInstance(location, satellites))`. */
+    suspend fun enable(location: GeoPoint, satellites: Int = 15): CommandResult
+
+    suspend fun disable(): CommandResult
 }
 
 /** Trwały zapis punktu przerwania między cyklami (np. plik w pamięci aplikacji). */

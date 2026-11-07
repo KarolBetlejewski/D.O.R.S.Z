@@ -80,3 +80,30 @@ suspend fun <P> DJIKey<P>.set(value: P, timeoutMs: Long = DEFAULT_ACTION_TIMEOUT
 
 fun IDJIError.toFailure(): CommandResult.Failure =
     CommandResult.Failure(reason = description()?.takeIf { it.isNotBlank() } ?: toString(), code = errorCode())
+
+/**
+ * Metoda menedżera MSDK z `CommonCallbacks.CompletionCallback` (np. `enableVirtualStick`,
+ * `enableSimulator`) jako funkcja `suspend` z limitem czasu.
+ */
+suspend fun awaitCompletion(
+    timeoutMs: Long = DEFAULT_ACTION_TIMEOUT_MS,
+    call: (CommonCallbacks.CompletionCallback) -> Unit,
+): CommandResult =
+    withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine { cont ->
+            try {
+                call(object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        if (cont.isActive) cont.resume(CommandResult.Success)
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        if (cont.isActive) cont.resume(error.toFailure())
+                    }
+                })
+            } catch (e: RuntimeException) {
+                if (cont.isActive) cont.resume(CommandResult.Failure(e.message ?: e.toString(), "EXCEPTION"))
+            }
+        }
+    } ?: CommandResult.Failure("Brak odpowiedzi SDK w ciągu ${timeoutMs / 1000} s", "TIMEOUT")
+

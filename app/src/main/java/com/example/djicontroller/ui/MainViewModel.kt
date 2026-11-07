@@ -12,6 +12,7 @@ import com.example.djicontroller.core.model.DroneState
 import com.example.djicontroller.core.model.GeoPoint
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.model.StationLink
+import com.example.djicontroller.core.model.VisionFrameResult
 import com.example.djicontroller.core.orchestrator.SafetyAlarm
 import com.example.djicontroller.di.DebugAction
 import kotlinx.coroutines.channels.BufferOverflow
@@ -38,6 +39,8 @@ data class MainUiState(
     val logFileName: String = "",
     /** Wariant demo — inne komunikaty, np. brak prośby o podłączenie RC-N2. */
     val isSimulation: Boolean = false,
+    /** Wynik detekcji ArUco do nakładki; `null`, gdy detekcja wyłączona. */
+    val vision: VisionFrameResult? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -66,7 +69,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(connection = connection, drone = drone, cycle = cycle, breakpoint = breakpoint, route = route)
     }
 
-    val state: StateFlow<MainUiState> = combine(core, container.station.link, safety.alarms) { base, station, alarms ->
+    val state: StateFlow<MainUiState> = combine(
+        core,
+        container.station.link,
+        safety.alarms,
+        container.vision.results,
+    ) { base, station, alarms, vision ->
         val reference: GeoPoint? = base.route?.station ?: base.drone.homeLocation
         val distance = reference?.let { base.drone.distanceToM(it) }
         base.copy(
@@ -75,6 +83,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             returnThresholdPercent = container.batteryPolicy.returnThresholdPercent(distance),
             logFileName = container.fileLogger.file.name,
             isSimulation = container.backend.isSimulation,
+            vision = vision,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 

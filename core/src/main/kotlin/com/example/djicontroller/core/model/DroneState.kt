@@ -57,6 +57,21 @@ data class DroneState(
     fun distanceToHomeM(): Double? = homeLocation?.let { distanceToM(it) }
 
     /**
+     * Prędkość pozioma w układzie BODY (do przodu, w prawo), m/s — z `KeyAircraftVelocity` (NED)
+     * obróconej o kurs. `null`, gdy brak prędkości albo kursu.
+     */
+    fun bodyVelocity(): BodyVelocity? {
+        val v = velocity ?: return null
+        val h = headingDeg ?: return null
+        val r = Math.toRadians(h)
+        return BodyVelocity(
+            forwardMps = v.northMps * kotlin.math.cos(r) + v.eastMps * kotlin.math.sin(r),
+            rightMps = -v.northMps * kotlin.math.sin(r) + v.eastMps * kotlin.math.cos(r),
+            upMps = -v.downMps,
+        )
+    }
+
+    /**
      * Zachowawcza ocena „czy dron może być w powietrzu”: brak danych traktujemy jak lot.
      * Używane do decyzji, których pomyłka w drugą stronę byłaby niebezpieczna.
      */
@@ -72,3 +87,6 @@ data class DroneState(
 
 /** Reakcja drona na utratę łącza z aparaturą (`KeyFailsafeAction`). */
 enum class FailsafeAction { HOVER, LANDING, GO_HOME, UNKNOWN }
+
+/** Prędkość w układzie BODY drona, m/s. */
+data class BodyVelocity(val forwardMps: Double, val rightMps: Double, val upMps: Double)

@@ -8,14 +8,21 @@ import com.example.djicontroller.core.model.ConnectionState
 import com.example.djicontroller.core.model.ControlLoss
 import com.example.djicontroller.core.model.ControlOwner
 import com.example.djicontroller.core.model.DroneState
+import com.example.djicontroller.core.model.GeoPoint
+import com.example.djicontroller.core.model.MarkerObservation
 import com.example.djicontroller.core.model.MissionPlan
 import com.example.djicontroller.core.model.MissionProgress
 import com.example.djicontroller.core.model.MissionStatus
 import com.example.djicontroller.core.model.Setpoint
+import com.example.djicontroller.core.model.SimulatorStatus
 import com.example.djicontroller.core.model.StationCommand
 import com.example.djicontroller.core.model.StationLink
 import com.example.djicontroller.core.model.StationStatus
+import com.example.djicontroller.core.model.StickAxes
 import com.example.djicontroller.core.model.VideoFrame
+import com.example.djicontroller.core.model.VirtualStickStatus
+import com.example.djicontroller.core.model.VisionFrameResult
+import com.example.djicontroller.core.model.VisionStats
 import com.example.djicontroller.core.port.BreakpointStore
 import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.Clock
@@ -25,8 +32,10 @@ import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.port.LogCategory
 import com.example.djicontroller.core.port.LogLevel
 import com.example.djicontroller.core.port.MissionPort
+import com.example.djicontroller.core.port.SimulatorPort
 import com.example.djicontroller.core.port.StationPort
 import com.example.djicontroller.core.port.TelemetryPort
+import com.example.djicontroller.core.port.VisionPort
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,14 +81,19 @@ class FakeFlightControl(val arbiter: ControlArbiter) : FlightControlPort {
     val setpoints: MutableList<Setpoint> = CopyOnWriteArrayList()
     override val controlOwner: StateFlow<ControlOwner> get() = arbiter.owner
     override val controlLost = MutableSharedFlow<ControlLoss>(extraBufferCapacity = 8)
+    override val virtualStick = MutableStateFlow(VirtualStickStatus())
 
     var onTakeOff: suspend () -> CommandResult = { CommandResult.Success }
     var onStartAutoLanding: suspend () -> CommandResult = { CommandResult.Success }
 
+    /** Ostatni parametr `confirmAutomatically` przekazany do [startAutoLanding]. */
+    @Volatile var lastAutoConfirm: Boolean? = null
+
     override suspend fun takeOff(): CommandResult { calls += "takeOff"; return onTakeOff() }
 
-    override suspend fun startAutoLanding(): CommandResult {
+    override suspend fun startAutoLanding(confirmAutomatically: Boolean): CommandResult {
         calls += "startAutoLanding"
+        lastAutoConfirm = confirmAutomatically
         if (!arbiter.tryAcquire(ControlOwner.AUTO_LANDING)) return CommandResult.Failure("sterowanie zajęte")
         return onStartAutoLanding()
     }
@@ -94,16 +108,28 @@ class FakeFlightControl(val arbiter: ControlArbiter) : FlightControlPort {
 
     override suspend fun startVirtualStick(): CommandResult {
         calls += "startVirtualStick"
-        return if (arbiter.tryAcquire(ControlOwner.VIRTUAL_STICK)) CommandResult.Success else CommandResult.Failure("sterowanie zajęte")
+        if (!arbiter.tryAcquire(ControlOwner.VIRTUAL_STICK)) return CommandResult.Failure("sterowanie zajęte")
+        virtualStick.value = virtualStick.value.copy(enabled = true, advancedMode = true, loopActive = true, authority = "MSDK")
+        return CommandResult.Success
     }
 
     override suspend fun stopVirtualStick(): CommandResult {
         calls += "stopVirtualStick"
         arbiter.release(ControlOwner.VIRTUAL_STICK)
+        virtualStick.value = virtualStick.value.copy(enabled = false, advancedMode = false, loopActive = false, authority = "RC")
         return CommandResult.Success
     }
 
-    override fun setVelocityTarget(setpoint: Setpoint) { setpoints += setpoint }
+    override fun setVelocityTarget(setpoint: Setpoint) {
+        setpoints += setpoint
+        virtualStick.value = virtualStick.value.copy(lastSent = setpoint)
+    }
+
+    override fun setStickAxes(axes: StickAxes): CommandResult {
+        if (virtualStick.value.loopActive) return CommandResult.Failure("pętla Virtual Stick działa")
+        virtualStick.value = virtualStick.value.copy(axes = axes)
+        return CommandResult.Success
+    }
 
     override suspend fun holdPosition(): CommandResult {
         calls += "holdPosition"
@@ -213,9 +239,37 @@ class FakeLanding(vararg outcomes: LandingOutcome) : LandingProcedure {
 
 class FakeCamera : CameraPort {
     override val frames = MutableSharedFlow<VideoFrame>(extraBufferCapacity = 1)
+    override val gimbalPitchDeg = MutableStateFlow<Double?>(0.0)
     val calls: MutableList<String> = CopyOnWriteArrayList()
-    override suspend fun pointGimbalDown(): CommandResult { calls += "gimbalDown"; return CommandResult.Success }
-    override suspend fun resetGimbal(): CommandResult { calls += "gimbalReset"; return CommandResult.Success }
+    override suspend fun pointGimbalDown(): CommandResult { calls += "gimbalDown"; gimbalPitchDeg.value = -90.0; return CommandResult.Success }
+    override suspend fun resetGimbal(): CommandResult { calls += "gimbalReset"; gimbalPitchDeg.value = 0.0; return CommandResult.Success }
+}
+
+/** Detekcja sterowana przez test: [publish] ustawia „widziany” marker. */
+class FakeVision : VisionPort {
+    override val results = MutableStateFlow<VisionFrameResult?>(null)
+    override val observation = MutableStateFlow<MarkerObservation?>(null)
+    override val users = MutableStateFlow<Set<String>>(emptySet())
+    override val stats = MutableStateFlow(VisionStats())
+    override fun acquire(user: String) { users.value = users.value + user }
+    override fun release(user: String) { users.value = users.value - user }
+    override fun resetStats() { stats.value = VisionStats() }
+    fun publish(observation: MarkerObservation?) { this.observation.value = observation }
+}
+
+class FakeSimulator : SimulatorPort {
+    override val status = MutableStateFlow(SimulatorStatus())
+    val calls: MutableList<String> = CopyOnWriteArrayList()
+    override suspend fun enable(location: GeoPoint, satellites: Int): CommandResult {
+        calls += "enable"
+        status.value = SimulatorStatus(enabled = true, location = location)
+        return CommandResult.Success
+    }
+    override suspend fun disable(): CommandResult {
+        calls += "disable"
+        status.value = SimulatorStatus()
+        return CommandResult.Success
+    }
 }
 
 class InMemoryBreakpointStore : BreakpointStore {

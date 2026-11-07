@@ -65,6 +65,7 @@ fun FlightLogger.marker(observation: MarkerObservation?, frameTimestampMs: Long)
                 "dz" to observation.dzM,
                 "yaw" to observation.yawDeg,
                 "frame" to observation.timestampMs,
+                "lat" to observation.latencyMs,
                 "reproj" to observation.reprojectionErrorPx,
             ),
         )
