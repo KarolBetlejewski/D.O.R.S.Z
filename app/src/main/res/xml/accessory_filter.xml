@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Filtr akcesoriów USB dla USB_ACCESSORY_ATTACHED (UsbAttachActivity).
+    SDK DJI 5.18.0 nie dostarcza tego zasobu, a przykład DJI się do niego odwołuje.
+    Pominięty atrybut `model` działa jak wieloznacznik: pasuje każda aparatura DJI, w tym RC-N2.
+-->
+<resources>
+    <usb-accessory manufacturer="DJI" />
+</resources>
