@@ -40,9 +40,8 @@ import org.maplibre.geojson.Point
 /**
  * Trasa patrolu na mapie (sekcja 6): pozycja drona, punkt startu (stacja), trasa i jej punkty.
  *
- * Podkład: kafelki OpenStreetMap — wystarczające do testów. Przed lotami produkcyjnymi
- * podmień [MAP_STYLE_JSON] na własny serwer kafelków lub zdjęcia satelitarne (polityka OSM
- * nie pozwala na intensywne użycie ich serwerów).
+ * Podkład: [MAP_STYLE_URL] (OpenFreeMap). Przed lotami produkcyjnymi można go podmienić
+ * na zdjęcia satelitarne lub własny serwer kafelków.
  */
 @Composable
 fun MapPanel(drone: DroneState, route: PatrolRoute?, modifier: Modifier = Modifier) {
@@ -81,7 +80,7 @@ fun MapPanel(drone: DroneState, route: PatrolRoute?, modifier: Modifier = Modifi
         mapView.getMapAsync { m ->
             m.uiSettings.isRotateGesturesEnabled = false
             m.uiSettings.isTiltGesturesEnabled = false
-            m.setStyle(Style.Builder().fromJson(MAP_STYLE_JSON)) { loaded ->
+            m.setStyle(Style.Builder().fromUri(MAP_STYLE_URL)) { loaded ->
                 loaded.addSource(GeoJsonSource(SRC_ROUTE_LINE))
                 loaded.addSource(GeoJsonSource(SRC_ROUTE_POINTS))
                 loaded.addSource(GeoJsonSource(SRC_HOME))
@@ -202,19 +201,9 @@ private const val LAYER_ROUTE_POINTS = "route-points-layer"
 private const val ACCENT_HEX = "#E8792B"
 private const val OK_HEX = "#3DBE7A"
 
-/** Styl MapLibre z rastrowymi kafelkami OSM. Do podmiany na produkcyjne źródło kafelków. */
-const val MAP_STYLE_JSON = """
-{
-  "version": 8,
-  "sources": {
-    "osm": {
-      "type": "raster",
-      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      "tileSize": 256,
-      "maxzoom": 19,
-      "attribution": "© OpenStreetMap contributors"
-    }
-  },
-  "layers": [ { "id": "osm", "type": "raster", "source": "osm" } ]
-}
-"""
+/**
+ * Styl mapy: OpenFreeMap „liberty” — darmowe kafelki wektorowe z danych OSM, bez klucza API,
+ * dozwolone w aplikacjach (bezpośrednie serwery tile.openstreetmap.org blokują aplikacje mobilne).
+ * Do lotów produkcyjnych warto rozważyć zdjęcia satelitarne lub własny serwer kafelków.
+ */
+const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"

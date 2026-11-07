@@ -46,6 +46,7 @@ import com.example.djicontroller.core.model.isAirborneStage
 import com.example.djicontroller.core.model.label
 import com.example.djicontroller.core.model.stage
 import com.example.djicontroller.core.model.status
+import com.example.djicontroller.di.DebugAction
 import java.util.Locale
 
 /** Ekran główny (sekcja 6, projekt D1), orientacja pozioma — podpięty pod ViewModel i kamerę drona. */
@@ -61,7 +62,8 @@ fun PatrolScreen(vm: MainViewModel = viewModel()) {
     PatrolContent(
         state = state,
         snackbar = snackbar,
-        video = { CameraPreview(vm.camera, Modifier.fillMaxSize()) },
+        video = { CameraPreview(vm.videoPreview, Modifier.fillMaxSize()) },
+        debugActions = vm.debugActions,
         onStart = vm::startCycle,
         onReturn = vm::returnToStation,
         onResume = vm::resume,
@@ -84,6 +86,7 @@ fun PatrolContent(
     onResume: () -> Unit,
     onReset: () -> Unit,
     onStop: () -> Unit,
+    debugActions: List<DebugAction> = emptyList(),
 ) {
     Box(
         Modifier
@@ -103,6 +106,10 @@ fun PatrolContent(
                     MapPanel(state.drone, state.route, Modifier.fillMaxSize())
                     PanelLabel("Mapa", Modifier.align(Alignment.TopStart))
                 }
+            }
+            if (debugActions.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                DebugBar(debugActions)
             }
             Spacer(Modifier.height(6.dp))
             BottomBar(
@@ -247,8 +254,11 @@ private fun VideoPanel(video: @Composable () -> Unit, state: MainUiState, modifi
                 text = when (state.connection) {
                     is ConnectionState.RegistrationFailed ->
                         "Rejestracja DJI nie powiodła się:\n${state.connection.reason}\nSprawdź klucz API i internet."
-                    ConnectionState.Initializing, ConnectionState.Registering -> "Uruchamianie MSDK…"
-                    else -> "Podłącz RC-N2 i włącz drona"
+                    ConnectionState.Initializing, ConnectionState.Registering ->
+                        if (state.isSimulation) "Uruchamianie symulatora…" else "Uruchamianie MSDK…"
+                    else ->
+                        if (state.isSimulation) "SYMULACJA — dron wyłączony na stacji.\nNaciśnij „Start cyklu”."
+                        else "Podłącz RC-N2 i włącz drona"
                 },
                 color = PatrolColors.TextMuted,
                 fontSize = 15.sp,
@@ -306,6 +316,28 @@ private fun PanelLabel(text: String, modifier: Modifier) {
             .background(Color.Black.copy(alpha = 0.55f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
+}
+
+// ---------------------------------------------------------------- akcje testowe (demo)
+
+@Composable
+private fun DebugBar(actions: List<DebugAction>) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("SYMULACJA:", color = PatrolColors.Warn, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        actions.forEach { action ->
+            OutlinedButton(
+                onClick = action.run,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                modifier = Modifier.height(30.dp),
+            ) {
+                Text(action.label, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- dolny pasek

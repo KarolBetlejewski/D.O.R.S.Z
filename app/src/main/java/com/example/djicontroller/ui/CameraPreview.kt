@@ -5,14 +5,13 @@ import android.view.SurfaceView
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.djicontroller.msdk.camera.CameraAdapter
 
 /**
- * Podgląd z kamery drona: `SurfaceView` przekazywany do MSDK przez [CameraAdapter]
- * (`putCameraStreamSurface` / `removeCameraStreamSurface`, wzorzec CameraStreamDetailFragment).
+ * Podgląd z kamery drona: `SurfaceView` przekazywany do [VideoPreview]
+ * (w `prod` do MSDK: `putCameraStreamSurface` / `removeCameraStreamSurface`).
  */
 @Composable
-fun CameraPreview(camera: CameraAdapter, modifier: Modifier = Modifier) {
+fun CameraPreview(preview: VideoPreview, modifier: Modifier = Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -21,11 +20,11 @@ fun CameraPreview(camera: CameraAdapter, modifier: Modifier = Modifier) {
                     override fun surfaceCreated(holder: SurfaceHolder) = Unit
 
                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                        camera.attachPreview(holder.surface, width, height)
+                        preview.attach(holder.surface, width, height)
                     }
 
                     override fun surfaceDestroyed(holder: SurfaceHolder) {
-                        camera.detachPreview(holder.surface)
+                        preview.detach(holder.surface)
                     }
                 })
             }

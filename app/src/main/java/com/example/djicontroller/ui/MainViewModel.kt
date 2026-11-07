@@ -13,7 +13,7 @@ import com.example.djicontroller.core.model.GeoPoint
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.model.StationLink
 import com.example.djicontroller.core.orchestrator.SafetyAlarm
-import com.example.djicontroller.msdk.camera.CameraAdapter
+import com.example.djicontroller.di.DebugAction
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,6 +36,8 @@ data class MainUiState(
     /** Próg powrotu dla bieżącej odległości od stacji (z trasy) lub od punktu startu. */
     val returnThresholdPercent: Int? = null,
     val logFileName: String = "",
+    /** Wariant demo — inne komunikaty, np. brak prośby o podłączenie RC-N2. */
+    val isSimulation: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -45,8 +47,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val safety = container.safety
     private val logger = container.logger
 
-    /** Adapter kamery do podpięcia powierzchni podglądu. */
-    val camera: CameraAdapter = container.camera
+    private val backend = container.backend
+
+    /** Cel podglądu wideo (MSDK albo symulator). */
+    val videoPreview: VideoPreview = backend.videoPreview
+
+    /** Akcje testowe symulatora; pusta lista w wariancie prod. */
+    val debugActions: List<DebugAction> = backend.debugActions
+    val backendName: String = backend.name
 
     private val core = combine(
         container.connection.state,
@@ -66,6 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             alarms = alarms,
             returnThresholdPercent = container.batteryPolicy.returnThresholdPercent(distance),
             logFileName = container.fileLogger.file.name,
+            isSimulation = container.backend.isSimulation,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
@@ -79,7 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startCycle() {
-        val route = orchestrator.activeRoute.value
+        val route = orchestrator.activeRoute.value ?: backend.defaultRoute
         if (route == null) {
             logger.command("ui_start_cycle", CommandResult.Failure("brak trasy"))
             _messages.tryEmit("Brak trasy patrolu. Ekran planowania trasy powstaje w fazie F4.")

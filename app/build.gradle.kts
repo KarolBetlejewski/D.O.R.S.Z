@@ -42,10 +42,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["API_KEY"] = djiApiKey
+    }
 
-        ndk {
-            // MSDK V5 dostarcza biblioteki natywne tylko dla arm64-v8a.
-            abiFilters += "arm64-v8a"
+    /*
+     * Warianty:
+     * - prod — prawdziwy dron przez DJI MSDK; tylko telefony ARM (biblioteki DJI są wyłącznie arm64-v8a),
+     * - demo — symulator drona i stacji, bez SDK DJI; działa na emulatorze x86_64 w Android Studio.
+     * Wybór: Build → Select Build Variant → prodDebug / demoDebug.
+     */
+    flavorDimensions += "backend"
+    productFlavors {
+        create("prod") {
+            dimension = "backend"
+            isDefault = true
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
+        }
+        create("demo") {
+            dimension = "backend"
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-demo"
+            ndk {
+                abiFilters += setOf("arm64-v8a", "x86_64")
+            }
         }
     }
 
@@ -117,7 +137,8 @@ android {
 
 dependencies {
     implementation(project(":core"))
-    implementation(project(":msdk-adapter"))
+    // SDK DJI tylko w wariancie prod — demo nie ładuje bibliotek natywnych DJI.
+    "prodImplementation"(project(":msdk-adapter"))
     implementation(project(":vision"))
     implementation(project(":station"))
 

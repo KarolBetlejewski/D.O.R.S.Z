@@ -14,10 +14,9 @@ import com.example.djicontroller.core.port.LogLevel
 import com.example.djicontroller.core.port.SystemClock
 import com.example.djicontroller.logging.FileFlightLogger
 import com.example.djicontroller.logging.LogcatFlightLogger
-import com.example.djicontroller.msdk.camera.CameraAdapter
-import com.example.djicontroller.msdk.connection.DroneConnection
-import com.example.djicontroller.msdk.connection.SdkInitializer
-import com.example.djicontroller.msdk.telemetry.KeyRepository
+import com.example.djicontroller.core.port.ConnectionPort
+import com.example.djicontroller.core.port.StationPort
+import com.example.djicontroller.core.port.TelemetryPort
 import com.example.djicontroller.storage.FileBreakpointStore
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -46,33 +45,29 @@ class AppContainer(context: Context) {
 
     val arbiter = ControlArbiter(logger)
 
-    // --- DJI MSDK (:msdk-adapter)
-    val sdk = SdkInitializer(context, logger)
-    val connection = DroneConnection(sdk, appScope, logger, clock)
-    val telemetry = KeyRepository(sdk, appScope, logger, clock)
-    val camera = CameraAdapter(sdk, appScope, logger, clock)
-
-    // --- Moduły kolejnych faz (patrz UnavailablePorts.kt)
-    val flight = UnavailableFlightControl(arbiter)
-    val mission = UnavailableMission()
-    val station = UnavailableStation()
-    val landing = UnavailableLanding()
+    // --- Platforma: DJI MSDK (wariant prod) albo symulator (wariant demo) — src/<wariant>/…/BackendFactory.kt
+    val backend: DroneBackend = createDroneBackend(context, appScope, logger, clock, arbiter)
+    val connection: ConnectionPort get() = backend.connection
+    val telemetry: TelemetryPort get() = backend.telemetry
+    val station: StationPort get() = backend.station
 
     // --- Logika (:core)
     val batteryPolicy = BatteryPolicy()
     val breakpoints = FileBreakpointStore(context)
-    val safety = SafetySupervisor(appScope, telemetry, connection, flight, mission, station, batteryPolicy, logger, clock)
+    val safety = SafetySupervisor(
+        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
+        batteryPolicy, logger, clock,
+    )
     val orchestrator = CycleOrchestrator(
-        appScope, telemetry, connection, flight, mission, station, landing, safety,
-        batteryPolicy, breakpoints, logger, clock,
+        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
+        backend.landing, safety, batteryPolicy, breakpoints, logger, clock,
     )
     private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
 
     /** Uruchamia MSDK, telemetrię, nadzór i zapis telemetrii. Wołać raz z `Application.onCreate`. */
     fun start() {
-        logger.system("app_start", fields = mapOf("log" to fileLogger.file.absolutePath))
-        sdk.initialize()
-        telemetry.start()
+        logger.system("app_start", fields = mapOf("backend" to backend.name, "log" to fileLogger.file.absolutePath))
+        backend.start()
         orchestrator.start()
         telemetryRecorder.start(appScope)
     }

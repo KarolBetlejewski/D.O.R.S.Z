@@ -3,7 +3,7 @@ package com.example.djicontroller
 import android.app.Application
 import android.content.Context
 import com.example.djicontroller.di.AppContainer
-import com.example.djicontroller.msdk.MsdkBootstrap
+import com.example.djicontroller.di.platformBootstrap
 import org.maplibre.android.MapLibre
 
 class PatrolApp : Application() {
@@ -13,8 +13,8 @@ class PatrolApp : Application() {
 
     override fun attachBaseContext(base: Context?) {
         super.attachBaseContext(base)
-        // Wymaganie MSDK V5 (wzorzec DJIAircraftApplication) — przez :msdk-adapter, bez importu dji.* w :app.
-        MsdkBootstrap.installHelper(this)
+        // prod: wymaganie MSDK V5 (Helper.install przez :msdk-adapter); demo: nic.
+        platformBootstrap.install(this)
     }
 
     override fun onCreate() {
