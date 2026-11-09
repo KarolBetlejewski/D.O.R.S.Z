@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.djicontroller.appContainer
-import com.example.djicontroller.core.landing.LandingPhase
 import com.example.djicontroller.core.logging.command
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.ConnectionState
@@ -42,8 +41,6 @@ data class MainUiState(
     val isSimulation: Boolean = false,
     /** Wynik detekcji ArUco do nakładki; `null`, gdy detekcja wyłączona. */
     val vision: VisionFrameResult? = null,
-    /** Pod-stan lądowania L1–L5; `null` poza lądowaniem. */
-    val landingPhase: LandingPhase? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,8 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         container.station.link,
         safety.alarms,
         container.vision.results,
-        container.landingPlanner.phase,
-    ) { base, station, alarms, vision, landingPhase ->
+    ) { base, station, alarms, vision ->
         val reference: GeoPoint? = base.route?.station ?: base.drone.homeLocation
         val distance = reference?.let { base.drone.distanceToM(it) }
         base.copy(
@@ -88,7 +84,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             logFileName = container.fileLogger.file.name,
             isSimulation = container.backend.isSimulation,
             vision = vision,
-            landingPhase = landingPhase,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 

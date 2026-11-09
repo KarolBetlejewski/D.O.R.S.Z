@@ -17,3 +17,8 @@ local.properties
 build/
 # Logi lotów skopiowane z telefonu
 *.jsonl
+# Dane sesji kompilatora Kotlin 2.x (lokalne, generowane automatycznie)
+.kotlin/
+# Klucze podpisu — nigdy do repozytorium
+*.jks
+*.keystore

@@ -1,5 +1,6 @@
 package com.example.djicontroller.msdk.connection
 
+import com.example.djicontroller.msdk.MsdkBootstrap
 import android.content.Context
 import com.example.djicontroller.core.logging.system
 import com.example.djicontroller.core.port.FlightLogger
@@ -53,6 +54,12 @@ class SdkInitializer(
     /** Wołać raz, z `Application.onCreate` (wątek główny). Kolejne wywołania są ignorowane. */
     fun initialize() {
         if (!started.compareAndSet(false, true)) return
+        if (!MsdkBootstrap.isSupportedDevice) {
+            // Emulator x86/x86_64: biblioteki DJI wywróciłyby proces (SIGSEGV) — zostajemy bez MSDK.
+            _state.value = SdkState.RegistrationFailed(MsdkBootstrap.unsupportedReason, "UNSUPPORTED_ABI")
+            logger.system("msdk_unsupported_device", LogLevel.ERROR, mapOf("abis" to android.os.Build.SUPPORTED_ABIS.joinToString()))
+            return
+        }
         _state.value = SdkState.Initializing
         logger.system("msdk_init_start")
 

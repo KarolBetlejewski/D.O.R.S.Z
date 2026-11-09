@@ -1,5 +1,7 @@
 package com.example.djicontroller.di
 
+import com.example.djicontroller.core.landing.LandingOutcome
+import com.example.djicontroller.core.landing.LandingProcedure
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.MissionPlan
 import com.example.djicontroller.core.model.MissionProgress
@@ -16,8 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * To NIE są atrapy udające działanie: każde polecenie kończy się jawnym
  * CommandResult.Failure z nazwą fazy, więc orkiestrator nie wystartuje cyklu
  * (stacja „rozłączona”).
- * Od F2 start, lądowanie i Virtual Stick działają (FlightControl z :msdk-adapter),
- * a od F3 precyzyjne lądowanie L1–L5 (LandingPlanner z :core).
+ * Od F2 start, lądowanie i Virtual Stick działają (FlightControl z :msdk-adapter).
  */
 
 private fun unavailable(what: String, phase: String) =
@@ -39,3 +40,8 @@ class UnavailableStation : StationPort {
     override suspend fun send(command: StationCommand) = unavailable("Łącze ze stacją", "F5")
 }
 
+/** Zastępuje precyzyjne lądowanie z fazy F3. */
+class UnavailableLanding : LandingProcedure {
+    override suspend fun execute(attempt: Int): LandingOutcome =
+        LandingOutcome.Aborted("Precyzyjne lądowanie powstaje w fazie F3")
+}

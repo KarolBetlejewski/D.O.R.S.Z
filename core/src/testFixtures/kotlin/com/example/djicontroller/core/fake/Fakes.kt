@@ -104,14 +104,7 @@ class FakeFlightControl(val arbiter: ControlArbiter) : FlightControlPort {
         return CommandResult.Success
     }
 
-    /** Wołany przy `KeyConfirmLanding` — test może tu zakończyć ochronę lądowania. */
-    var onConfirmLanding: suspend () -> Unit = {}
-
-    override suspend fun confirmLanding(): CommandResult {
-        calls += "confirmLanding"
-        onConfirmLanding()
-        return CommandResult.Success
-    }
+    override suspend fun confirmLanding(): CommandResult { calls += "confirmLanding"; return CommandResult.Success }
 
     override suspend fun startVirtualStick(): CommandResult {
         calls += "startVirtualStick"

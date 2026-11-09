@@ -14,7 +14,6 @@ import com.example.djicontroller.core.port.LogLevel
 import com.example.djicontroller.core.diagnostics.FlightTestRunner
 import com.example.djicontroller.core.diagnostics.MarkerHoverTest
 import com.example.djicontroller.core.diagnostics.StickAxisCheck
-import com.example.djicontroller.core.landing.LandingPlanner
 import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.logging.FileFlightLogger
 import com.example.djicontroller.logging.LogcatFlightLogger
@@ -65,41 +64,27 @@ class AppContainer(context: Context) {
     // --- Logika (:core)
     val batteryPolicy = BatteryPolicy()
     val breakpoints = FileBreakpointStore(context)
-    val safety: SafetySupervisor = SafetySupervisor(
+    val safety = SafetySupervisor(
         appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
         batteryPolicy, logger, clock,
     )
+    val orchestrator = CycleOrchestrator(
+        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
+        backend.landing, safety, batteryPolicy, breakpoints, logger, clock,
+    )
+    private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
+
     // --- Wizja (:vision, sekcja 5.4)
     /** Własna kalibracja kamery: `Android/data/<pakiet>/files/camera_calibration.json` (format: CameraCalibration.toJson). */
     val calibrationFile = File(context.getExternalFilesDir(null), "camera_calibration.json")
-    val vision: VisionPipeline = VisionPipeline(appScope, backend.camera, settings.padLayout, loadCalibration(), logger, clock)
-
-    // --- Precyzyjne lądowanie L1–L5 (:core/landing, F3) — ten sam planer w prod i demo
-    // Jawne typy: planer i orkiestrator odwołują się do siebie (lambda stationLocation) — bez nich
-    // kompilator Kotlin zgłasza „Type checking has run into a recursive problem”.
-    val landingPlanner: LandingPlanner = LandingPlanner(
-        flight = backend.flight,
-        mission = backend.mission,
-        camera = backend.camera,
-        vision = vision,
-        telemetry = backend.telemetry,
-        station = backend.station,
-        stationLocation = { orchestrator.activeRoute.value?.station ?: backend.telemetry.state.value.homeLocation },
-        logger = logger,
-        clock = clock,
-    )
-
-    val orchestrator: CycleOrchestrator = CycleOrchestrator(
-        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
-        landingPlanner, safety, batteryPolicy, breakpoints, logger, clock,
-    )
-    private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
+    val vision = VisionPipeline(appScope, backend.camera, settings.padLayout, loadCalibration(), logger, clock)
+        .also { backend.attachVision(it) }
 
     /** Klatki zapisywane z Diagnostyki (np. szachownica do kalibracji). */
     val framesDir = File(context.getExternalFilesDir(null), "frames")
 
     // --- Testy lotu z ekranu Diagnostyka (F2: R3 i test osi)
-    val flightTests: FlightTestRunner = FlightTestRunner(
+    val flightTests = FlightTestRunner(
         scope = appScope,
         flight = backend.flight,
         telemetry = backend.telemetry,
@@ -107,8 +92,8 @@ class AppContainer(context: Context) {
         isCycleIdle = { orchestrator.state.value.let { it == CycleState.Ready || it is CycleState.Failure } },
         logger = logger,
     )
-    val hoverTest: MarkerHoverTest = MarkerHoverTest(flightTests, backend.flight, backend.camera, vision, backend.telemetry, logger, clock)
-    val axisCheck: StickAxisCheck = StickAxisCheck(flightTests, backend.flight, backend.telemetry, logger, clock)
+    val hoverTest = MarkerHoverTest(flightTests, backend.flight, backend.camera, vision, backend.telemetry, logger, clock)
+    val axisCheck = StickAxisCheck(flightTests, backend.flight, backend.telemetry, logger, clock)
 
     private fun loadCalibration(): CameraCalibration {
         CameraCalibration.load(calibrationFile)

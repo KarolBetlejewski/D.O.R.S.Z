@@ -1,7 +1,5 @@
 package com.example.djicontroller.ui
 
-import androidx.compose.ui.text.font.FontFamily
-import com.example.djicontroller.core.landing.LandingPhase
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -164,9 +162,7 @@ private fun TopStatusBar(state: MainUiState) {
         )
         ConnectionChip(state.connection)
         StatusChip(
-            text = state.landingPhase?.let { phase ->
-                if (state.cycle is CycleState.Landing) "${state.cycle.label()} · ${phase.step.name.take(2)}" else null
-            } ?: state.cycle.label(),
+            text = state.cycle.label(),
             color = when (state.cycle) {
                 is CycleState.Failure -> PatrolColors.Stop
                 is CycleState.Holding -> PatrolColors.Warn
@@ -256,7 +252,6 @@ private fun VideoPanel(video: @Composable () -> Unit, state: MainUiState, modifi
     Panel(modifier) {
         video()
         if (state.vision != null) VisionOverlay(state.vision, Modifier.fillMaxSize())
-        state.landingPhase?.let { LandingPhaseBadge(it, Modifier.align(Alignment.BottomEnd).padding(8.dp)) }
         PanelLabel("Obraz z kamery", Modifier.align(Alignment.TopStart))
         if (state.connection !is ConnectionState.Connected) {
             Text(
@@ -449,24 +444,3 @@ internal fun StopButton(onClick: () -> Unit, active: Boolean) {
 }
 
 private fun fmt(value: Double): String = String.format(Locale.US, "%.1f", value)
-
-/** Pod-stan lądowania L1–L5 z błędem i tolerancją stożka (F3). */
-@Composable
-private fun LandingPhaseBadge(phase: LandingPhase, modifier: Modifier) {
-    val numbers = listOfNotNull(
-        phase.heightM?.let { "h ${String.format(Locale.US, "%.1f", it)} m" },
-        phase.horizontalErrorM?.let { e ->
-            "błąd ${String.format(Locale.US, "%.2f", e)}" + (phase.toleranceM?.let { " / ${String.format(Locale.US, "%.2f", it)} m" } ?: " m")
-        },
-    ).joinToString(" · ")
-    Column(
-        modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color.Black.copy(alpha = 0.65f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    ) {
-        Text("${phase.step.label} · próba ${phase.attempt}", color = PatrolColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        if (phase.detail.isNotEmpty()) Text(phase.detail, color = Color.White, fontSize = 12.sp)
-        if (numbers.isNotEmpty()) Text(numbers, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    }
-}
