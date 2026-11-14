@@ -283,7 +283,7 @@ class DroneSimulator(
 
     /**
      * Pionowe lądowanie w bieżącym miejscu i wyłączenie silników (jak `KeyStartAutoLanding`).
-     * Z [landingProtection] dron zatrzymuje się na 0,5 m i zgłasza `isLandingConfirmationNeeded`
+     * Z [landingProtection] dron zatrzymuje się na 0,3 m i zgłasza `isLandingConfirmationNeeded`
      * (ochrona lądowania, R5) — dalej schodzi dopiero po [confirmLanding].
      */
     suspend fun descendAndLand() {
@@ -339,6 +339,7 @@ class DroneSimulator(
     companion object {
         const val TICK_MS = 100L
         const val VS_TAU_S = 0.35
-        const val LANDING_PROTECTION_ALT_M = 0.5
+        /** Poniżej przejścia L3 → L4 (0,5 m), żeby ochrona lądowania (R5) zadziałała też w demo. */
+        const val LANDING_PROTECTION_ALT_M = 0.3
     }
 }

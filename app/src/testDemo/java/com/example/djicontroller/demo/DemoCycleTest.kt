@@ -1,8 +1,10 @@
 package com.example.djicontroller.demo
 
 import com.example.djicontroller.core.control.ControlArbiter
+import com.example.djicontroller.core.fake.FakeVision
 import com.example.djicontroller.core.fake.InMemoryBreakpointStore
 import com.example.djicontroller.core.fake.RecordingLogger
+import com.example.djicontroller.core.landing.LandingPlanner
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.core.model.GeoPoint
@@ -52,7 +54,10 @@ class DemoCycleTest {
         val mission = SimulatedMission(sim, arbiter, scope, logger)
         val stationPort = SimulatedStation(sim, scope, clock, logger, chargeRealSeconds = 1.0)
         val camera = SimulatedCamera(sim, scope, clock, logger)
-        val landing = SimulatedLanding(sim, flight, clock, logger, camera = camera)
+        val vision = FakeVision()
+        val landing = LandingPlanner(
+            flight, mission, camera, vision, SimulatedTelemetry(sim), stationPort, { station }, logger, clock,
+        )
         val policy = BatteryPolicy()
         val safety = SafetySupervisor(
             scope, SimulatedTelemetry(sim), SimulatedConnection(sim), flight, mission, stationPort, policy, logger, clock,
@@ -63,6 +68,7 @@ class DemoCycleTest {
         )
 
         init {
+            scope.feedMarkerFromSimulator(sim, vision, clock)
             sim.start()
             stationPort.start()
             orchestrator.start()

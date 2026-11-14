@@ -162,7 +162,7 @@ private fun TopStatusBar(state: MainUiState) {
         )
         ConnectionChip(state.connection)
         StatusChip(
-            text = state.cycle.label(),
+            text = state.cycle.label() + (state.landingPhase?.let { " · ${it.step.label}" } ?: ""),
             color = when (state.cycle) {
                 is CycleState.Failure -> PatrolColors.Stop
                 is CycleState.Holding -> PatrolColors.Warn

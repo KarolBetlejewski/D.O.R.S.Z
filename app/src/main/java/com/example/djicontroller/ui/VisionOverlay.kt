@@ -94,7 +94,7 @@ private fun VisionReadout(result: VisionFrameResult?, modifier: Modifier) {
                 "dx ${f2(o.dxM)}  dy ${f2(o.dyM)} m",
                 "dz ${f2(o.dzM)} m  yaw ${f1(o.yawDeg)}°",
                 "detekcja ${result.detectionMs} ms · klatka ${result.frameAgeMs} ms",
-                "reproj ${o.reprojectionErrorPx?.let { f2(it) } ?: "—"} px",
+                "reproj ${o.reprojectionErrorPx?.let { f2(it) } ?: "—"} px" + if (o.coarse) " · poza zgrubna" else "",
             )
         }
     }

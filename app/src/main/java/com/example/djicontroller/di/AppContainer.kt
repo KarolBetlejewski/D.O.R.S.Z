@@ -2,10 +2,13 @@ package com.example.djicontroller.di
 
 import android.content.Context
 import com.example.djicontroller.core.control.ControlArbiter
+import com.example.djicontroller.core.landing.LandingPlanner
+import com.example.djicontroller.core.landing.LandingPlannerConfig
 import com.example.djicontroller.core.logging.CompositeFlightLogger
 import com.example.djicontroller.core.logging.TelemetryRecorder
 import com.example.djicontroller.core.logging.system
 import com.example.djicontroller.core.orchestrator.BatteryPolicy
+import com.example.djicontroller.core.orchestrator.CycleConfig
 import com.example.djicontroller.core.orchestrator.CycleOrchestrator
 import com.example.djicontroller.core.orchestrator.SafetySupervisor
 import com.example.djicontroller.core.port.Clock
@@ -64,21 +67,38 @@ class AppContainer(context: Context) {
     // --- Logika (:core)
     val batteryPolicy = BatteryPolicy()
     val breakpoints = FileBreakpointStore(context)
-    val safety = SafetySupervisor(
+    val safety: SafetySupervisor = SafetySupervisor(
         appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
         batteryPolicy, logger, clock,
     )
-    val orchestrator = CycleOrchestrator(
-        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
-        backend.landing, safety, batteryPolicy, breakpoints, logger, clock,
-    )
-    private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
 
     // --- Wizja (:vision, sekcja 5.4)
     /** Własna kalibracja kamery: `Android/data/<pakiet>/files/camera_calibration.json` (format: CameraCalibration.toJson). */
     val calibrationFile = File(context.getExternalFilesDir(null), "camera_calibration.json")
-    val vision = VisionPipeline(appScope, backend.camera, settings.padLayout, loadCalibration(), logger, clock)
-        .also { backend.attachVision(it) }
+    val vision: VisionPipeline = VisionPipeline(appScope, backend.camera, settings.padLayout, loadCalibration(), logger, clock)
+
+    // --- Precyzyjne lądowanie L1–L5 (F3, :core/landing) — ten sam planer w prod i demo.
+    // Jawne typy: planer i orkiestrator odwołują się do siebie (lambda położenia stacji) — bez nich
+    // kompilator Kotlin zgłasza „Type checking has run into a recursive problem”.
+    val landingPlanner: LandingPlanner = LandingPlanner(
+        flight = backend.flight,
+        mission = backend.mission,
+        camera = backend.camera,
+        vision = vision,
+        telemetry = backend.telemetry,
+        station = backend.station,
+        stationLocation = { orchestrator.activeRoute.value?.station ?: backend.telemetry.state.value.homeLocation },
+        logger = logger,
+        clock = clock,
+        config = LandingPlannerConfig(maxAttempts = CYCLE_MAX_LANDING_ATTEMPTS),
+    )
+
+    val orchestrator: CycleOrchestrator = CycleOrchestrator(
+        appScope, backend.telemetry, backend.connection, backend.flight, backend.mission, backend.station,
+        landingPlanner, safety, batteryPolicy, breakpoints, logger, clock,
+        CycleConfig(maxLandingAttempts = CYCLE_MAX_LANDING_ATTEMPTS),
+    )
+    private val telemetryRecorder = TelemetryRecorder(telemetry, logger, periodMs = 200)
 
     /** Klatki zapisywane z Diagnostyki (np. szachownica do kalibracji). */
     val framesDir = File(context.getExternalFilesDir(null), "frames")
@@ -102,6 +122,11 @@ class AppContainer(context: Context) {
                 logger.system("calibration_invalid", LogLevel.ERROR, mapOf("file" to calibrationFile.path, "error" to e.toString()))
             }
         return CameraCalibration.mini4ProDefault()
+    }
+
+    private companion object {
+        /** Liczba prób lądowania — jedna wartość dla orkiestratora i planera L1–L5. */
+        const val CYCLE_MAX_LANDING_ATTEMPTS = 3
     }
 
     /** Uruchamia MSDK, telemetrię, nadzór i zapis telemetrii. Wołać raz z `Application.onCreate`. */

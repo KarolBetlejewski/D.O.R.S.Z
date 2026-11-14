@@ -1,6 +1,7 @@
 package com.example.djicontroller.core
 
 import com.example.djicontroller.core.control.ControlArbiter
+import com.example.djicontroller.core.fake.FakeCamera
 import com.example.djicontroller.core.fake.FakeClock
 import com.example.djicontroller.core.fake.FakeConnection
 import com.example.djicontroller.core.fake.FakeFlightControl
@@ -8,9 +9,11 @@ import com.example.djicontroller.core.fake.FakeLanding
 import com.example.djicontroller.core.fake.FakeMission
 import com.example.djicontroller.core.fake.FakeStation
 import com.example.djicontroller.core.fake.FakeTelemetry
+import com.example.djicontroller.core.fake.FakeVision
 import com.example.djicontroller.core.fake.InMemoryBreakpointStore
 import com.example.djicontroller.core.fake.RecordingLogger
 import com.example.djicontroller.core.landing.LandingOutcome
+import com.example.djicontroller.core.landing.LandingProcedure
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.core.model.DroneState
@@ -75,6 +78,8 @@ class TestRig(
         returnTimeoutMarginMs = 2_000,
     ),
     landingOutcomes: List<LandingOutcome> = listOf(LandingOutcome.Landed),
+    /** Własna procedura lądowania (np. prawdziwy LandingPlanner); domyślnie [FakeLanding] z [landingOutcomes]. */
+    landingFactory: (TestRig.() -> LandingProcedure)? = null,
 ) {
     val clock = FakeClock()
     val logger = RecordingLogger()
@@ -85,11 +90,14 @@ class TestRig(
     val mission = FakeMission(arbiter)
     val station = FakeStation(clock)
     val landing = FakeLanding(*landingOutcomes.toTypedArray())
+    val camera = FakeCamera()
+    val vision = FakeVision()
     val breakpoints = InMemoryBreakpointStore()
     val batteryPolicy = BatteryPolicy()
     val safety = SafetySupervisor(scope, telemetry, connection, flight, mission, station, batteryPolicy, logger, clock)
+    val landingProcedure: LandingProcedure = landingFactory?.invoke(this) ?: landing
     val orchestrator = CycleOrchestrator(
-        scope, telemetry, connection, flight, mission, station, landing, safety,
+        scope, telemetry, connection, flight, mission, station, landingProcedure, safety,
         batteryPolicy, breakpoints, logger, clock, config,
     )
 
@@ -165,10 +173,11 @@ class TestRig(
 /** Uruchamia test z rigiem i sprząta wszystkie korutyny po zakończeniu. */
 fun rigTest(
     landingOutcomes: List<LandingOutcome> = listOf(LandingOutcome.Landed),
+    landingFactory: (TestRig.() -> LandingProcedure)? = null,
     block: suspend TestRig.() -> Unit,
 ) = runBlocking {
     val job = Job()
-    val rig = TestRig(CoroutineScope(coroutineContext + job), landingOutcomes = landingOutcomes)
+    val rig = TestRig(CoroutineScope(coroutineContext + job), landingOutcomes = landingOutcomes, landingFactory = landingFactory)
     rig.orchestrator.start()
     try {
         rig.block()

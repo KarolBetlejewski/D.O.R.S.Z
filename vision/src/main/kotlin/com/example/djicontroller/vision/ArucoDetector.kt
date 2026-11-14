@@ -29,13 +29,29 @@ import kotlin.math.max
 import kotlin.math.min
 import org.opencv.objdetect.ArucoDetector as CvArucoDetector
 
+/** Metoda doprecyzowania narożników ArUco (`DetectorParameters.cornerRefinementMethod`). */
+enum class CornerRefinement { NONE, SUBPIX, CONTOUR }
+
 data class ArucoDetectorConfig(
     /** Poza z błędem reprojekcji większym niż tyle pikseli jest odrzucana. */
     val maxReprojectionErrorPx: Double = 3.0,
     /** Klatki szersze niż tyle są zmniejszane przed detekcją (czas detekcji ~ liczba pikseli). */
     val maxDetectionWidth: Int = 1280,
-    /** Dokładniejsze narożniki (`CORNER_REFINE_SUBPIX`) — kilka ms więcej, mniejszy szum pozy. */
-    val subpixelCorners: Boolean = true,
+    /**
+     * Doprecyzowanie narożników. Domyślnie [CornerRefinement.CONTOUR]: dopasowuje proste do krawędzi ramki,
+     * więc działa też przy kilku pikselach na pole markera. `SUBPIX` przy małym markerze w obrazie
+     * przesuwa narożniki na wewnętrzne krawędzie pól — log z emulatora (2026-11-09): na 8 m marker 16
+     * wykryty w 120 z 122 klatek, a poza przeszła kontrolę reprojekcji tylko w 8.
+     */
+    val cornerRefinement: CornerRefinement = CornerRefinement.CONTOUR,
+    /**
+     * Gdy `solvePnP` przekroczy [maxReprojectionErrorPx], ale ID markera jest zdekodowane, zwróć pozę
+     * zgrubną z narożników ([PoseConversion.fromCorners], `MarkerObservation.coarse = true`) zamiast nic.
+     * Środek markera i kurs są wtedy nadal dobre — lądowanie nie „gubi” markera, który widać w kadrze.
+     */
+    val coarseFallback: Boolean = true,
+    /** Poza zgrubna tylko przy błędzie reprojekcji ≤ tyle boku markera w pikselach (odrzuca zdeformowane narożniki). */
+    val coarseMaxErrorFraction: Double = 0.25,
     /** Detekcja dwuprzebiegowa markerów zagnieżdżonych (patrz [LandingPadLayout]). */
     val nestedSearch: Boolean = true,
     /**
@@ -84,7 +100,11 @@ class ArucoDetector(
         },
     )
     private val params = DetectorParameters().apply {
-        if (config.subpixelCorners) set_cornerRefinementMethod(Objdetect.CORNER_REFINE_SUBPIX)
+        when (config.cornerRefinement) {
+            CornerRefinement.NONE -> Unit
+            CornerRefinement.SUBPIX -> set_cornerRefinementMethod(Objdetect.CORNER_REFINE_SUBPIX)
+            CornerRefinement.CONTOUR -> set_cornerRefinementMethod(Objdetect.CORNER_REFINE_CONTOUR)
+        }
     }
     private val detector = CvArucoDetector(dictionary, params)
 
@@ -109,9 +129,11 @@ class ArucoDetector(
         val age = finished - frame.timestampMs
         val withLatency = markers.map { m -> m.copy(observation = m.observation?.copy(latencyMs = age)) }
         val valid = withLatency.filter { it.observation != null }
+        // Pierwszeństwo mają pozy z solvePnP; zgrubne tylko, gdy w klatce nie ma żadnej dokładnej.
+        val pool = valid.filter { it.observation?.coarse == false }.ifEmpty { valid }
         val selected = (
-            valid.filter { sidePx(it) >= config.minPreferredSidePx }.minByOrNull { it.sizeM ?: Double.MAX_VALUE }
-                ?: valid.maxByOrNull { sidePx(it) }
+            pool.filter { sidePx(it) >= config.minPreferredSidePx }.minByOrNull { it.sizeM ?: Double.MAX_VALUE }
+                ?: pool.maxByOrNull { sidePx(it) }
             )?.observation
         return VisionFrameResult(
             frameTimestampMs = frame.timestampMs,
@@ -277,13 +299,13 @@ class ArucoDetector(
         val projected = MatOfPoint2f()
         try {
             val ok = Calib3d.solvePnP(objectPoints, imagePoints, cameraMatrix, dist, rvec, tvec, false, Calib3d.SOLVEPNP_IPPE_SQUARE)
-            if (!ok) return null
+            if (!ok) return coarsePose(marker, corners, calib, gimbalPitchDeg, timestampMs, null)
             Calib3d.projectPoints(objectPoints, rvec, tvec, cameraMatrix, dist, projected)
             val p = projected.toArray()
             var err = 0.0
             for (k in 0 until 4) err += hypot(p[k].x - corners[2 * k], p[k].y - corners[2 * k + 1])
             err /= 4
-            if (err > config.maxReprojectionErrorPx) return null
+            if (err > config.maxReprojectionErrorPx) return coarsePose(marker, corners, calib, gimbalPitchDeg, timestampMs, err)
 
             Calib3d.Rodrigues(rvec, rotation)
             val r = DoubleArray(9)
@@ -312,6 +334,39 @@ class ArucoDetector(
             rotation.release()
             projected.release()
         }
+    }
+
+    /** Poza zgrubna z narożników (patrz [ArucoDetectorConfig.coarseFallback]); `null`, gdy wyłączona lub narożniki złe. */
+    private fun coarsePose(
+        marker: PadMarker,
+        corners: FloatArray,
+        calib: CameraCalibration,
+        gimbalPitchDeg: Double?,
+        timestampMs: Long,
+        reprojectionErrorPx: Double?,
+    ): MarkerObservation? {
+        if (!config.coarseFallback) return null
+        var side = 0.0
+        for (k in 0 until 4) {
+            val n = (k + 1) % 4
+            side += hypot((corners[2 * n] - corners[2 * k]).toDouble(), (corners[2 * n + 1] - corners[2 * k + 1]).toDouble())
+        }
+        side /= 4
+        if (reprojectionErrorPx != null && reprojectionErrorPx > config.coarseMaxErrorFraction * side) return null
+        val pose = PoseConversion.fromCorners(
+            corners, calib.fx, calib.fy, calib.cx, calib.cy, marker.sizeM, marker.offsetRightM, marker.offsetUpM, gimbalPitchDeg,
+        ) ?: return null
+        if (pose.heightM <= 0) return null
+        return MarkerObservation(
+            markerId = marker.id,
+            dxM = pose.forwardM,
+            dyM = pose.rightM,
+            dzM = pose.heightM,
+            yawDeg = pose.yawDeg,
+            timestampMs = timestampMs,
+            reprojectionErrorPx = reprojectionErrorPx,
+            coarse = true,
+        )
     }
 
     override fun close() {

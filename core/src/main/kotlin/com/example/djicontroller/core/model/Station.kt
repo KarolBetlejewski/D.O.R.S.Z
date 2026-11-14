@@ -9,6 +9,11 @@ data class StationStatus(
     val ready: Boolean,
     /** Czas monotoniczny odbioru wiadomości, ms. */
     val receivedAtMs: Long,
+    /**
+     * Łącze ze stacją działa. Status przysłany przez stację ma zawsze `true`; `false` pojawia się tylko
+     * w widoku [StationLink.toStatus] przy braku łącza (F5: jeden strumień zamiast osobnego `link`).
+     */
+    val isConnected: Boolean = true,
 )
 
 sealed interface StationLink {
@@ -21,6 +26,19 @@ sealed interface StationLink {
 
 val StationLink.status: StationStatus?
     get() = (this as? StationLink.Connected)?.status
+
+/**
+ * Płaski widok łącza i statusu (F5). Bez łącza albo przed pierwszą wiadomością `status` wszystkie flagi
+ * są `false` — wartości nieznane traktujemy zachowawczo (np. „płyta zajęta”, „brak drona”).
+ */
+fun StationLink.toStatus(): StationStatus = when (this) {
+    is StationLink.Connected -> status ?: StationStatus(
+        charging = false, dronePresent = false, padClear = false, ready = false, receivedAtMs = 0L, isConnected = true,
+    )
+    StationLink.Disconnected -> StationStatus(
+        charging = false, dronePresent = false, padClear = false, ready = false, receivedAtMs = 0L, isConnected = false,
+    )
+}
 
 enum class PowerAction { POWER_ON, POWER_OFF }
 

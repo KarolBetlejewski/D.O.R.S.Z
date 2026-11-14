@@ -9,12 +9,10 @@ import com.example.djicontroller.core.model.StickAxes
 import com.example.djicontroller.core.port.Clock
 import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.port.SimulatorPort
-import com.example.djicontroller.core.port.VisionPort
 import com.example.djicontroller.demo.DroneSimulator
 import com.example.djicontroller.demo.SimulatedCamera
 import com.example.djicontroller.demo.SimulatedConnection
 import com.example.djicontroller.demo.SimulatedFlight
-import com.example.djicontroller.demo.SimulatedLanding
 import com.example.djicontroller.demo.SimulatedMission
 import com.example.djicontroller.demo.SimulatedStation
 import com.example.djicontroller.demo.SimulatedTelemetry
@@ -78,11 +76,6 @@ class SimulatedBackend(
     override val flight = simFlight
     override val mission = SimulatedMission(drone, arbiter, scope, logger)
     override val station = simStation
-    override val landing = SimulatedLanding(drone, simFlight, clock, logger, camera = simCamera)
-
-    override fun attachVision(vision: VisionPort) {
-        landing.vision = vision
-    }
     override val defaultRoute: PatrolRoute = DEMO_ROUTE
 
     /** W demo cały dron jest symulowany — symulator MSDK nie ma tu zastosowania. */

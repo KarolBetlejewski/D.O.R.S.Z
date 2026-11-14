@@ -16,6 +16,8 @@ import kotlin.math.hypot
  * @property timestampMs czas monotoniczny odbioru klatki, z której pochodzi obserwacja, ms
  * @property latencyMs wiek klatki w chwili zakończenia detekcji (odbiór → wynik), ms — test R4
  * @property reprojectionErrorPx średni błąd reprojekcji narożników — miara jakości detekcji
+ * @property coarse poza zgrubna: `solvePnP` odrzucony (zbyt duży błąd reprojekcji), położenie policzone
+ *   ze środka markera w pikselach i jego rozmiaru — środek i kurs są wiarygodne, wysokość ±5–10 %
  */
 data class MarkerObservation(
     val markerId: Int,
@@ -26,6 +28,7 @@ data class MarkerObservation(
     val timestampMs: Long,
     val latencyMs: Long? = null,
     val reprojectionErrorPx: Double? = null,
+    val coarse: Boolean = false,
 ) {
     val horizontalErrorM: Double get() = hypot(dxM, dyM)
 

@@ -104,7 +104,14 @@ class FakeFlightControl(val arbiter: ControlArbiter) : FlightControlPort {
         return CommandResult.Success
     }
 
-    override suspend fun confirmLanding(): CommandResult { calls += "confirmLanding"; return CommandResult.Success }
+    /** Wołany przy każdym [confirmLanding] — test może tu „puścić” symulowaną ochronę lądowania. */
+    var onConfirmLanding: () -> Unit = {}
+
+    override suspend fun confirmLanding(): CommandResult {
+        calls += "confirmLanding"
+        onConfirmLanding()
+        return CommandResult.Success
+    }
 
     override suspend fun startVirtualStick(): CommandResult {
         calls += "startVirtualStick"
@@ -254,7 +261,25 @@ class FakeVision : VisionPort {
     override fun acquire(user: String) { users.value = users.value + user }
     override fun release(user: String) { users.value = users.value - user }
     override fun resetStats() { stats.value = VisionStats() }
-    fun publish(observation: MarkerObservation?) { this.observation.value = observation }
+
+    /**
+     * Wynik przetworzenia jednej klatki: [observation] = widziany marker albo `null` (klatka bez markera).
+     * Ustawia też [results] — planer lądowania odróżnia po nim „brak markera” od „brak nowych klatek”.
+     */
+    fun publish(observation: MarkerObservation?, frameTimestampMs: Long? = null) {
+        val ts = frameTimestampMs ?: observation?.timestampMs ?: ((results.value?.frameTimestampMs ?: 0L) + 1)
+        results.value = VisionFrameResult(
+            frameTimestampMs = ts,
+            frameWidth = 1280,
+            frameHeight = 720,
+            markers = emptyList(),
+            selected = observation,
+            detectionMs = 0,
+            frameAgeMs = observation?.latencyMs ?: 0,
+            source = "fake",
+        )
+        this.observation.value = observation
+    }
 }
 
 class FakeSimulator : SimulatorPort {

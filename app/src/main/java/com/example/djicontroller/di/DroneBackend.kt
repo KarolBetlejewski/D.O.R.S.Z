@@ -1,14 +1,12 @@
 package com.example.djicontroller.di
 
 import android.app.Application
-import com.example.djicontroller.core.landing.LandingProcedure
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.ConnectionPort
 import com.example.djicontroller.core.port.FlightControlPort
 import com.example.djicontroller.core.port.MissionPort
 import com.example.djicontroller.core.port.SimulatorPort
-import com.example.djicontroller.core.port.VisionPort
 import com.example.djicontroller.core.port.StationPort
 import com.example.djicontroller.core.port.TelemetryPort
 import com.example.djicontroller.ui.VideoPreview
@@ -32,7 +30,6 @@ interface DroneBackend {
     val flight: FlightControlPort
     val mission: MissionPort
     val station: StationPort
-    val landing: LandingProcedure
 
     /** Symulator MSDK (test R3 bez śmigieł); `null` w `demo`, gdzie cały dron jest symulowany. */
     val simulator: SimulatorPort?
@@ -45,9 +42,6 @@ interface DroneBackend {
 
     /** Uruchamia backend; wołane raz z `AppContainer.start()`. */
     fun start()
-
-    /** Podpięcie potoku wizyjnego, który powstaje w AppContainer już po backendzie (np. lądowanie w demo). */
-    fun attachVision(vision: VisionPort) {}
 }
 
 data class DebugAction(val label: String, val run: () -> Unit)

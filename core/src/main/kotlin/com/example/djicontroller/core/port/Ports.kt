@@ -14,12 +14,17 @@ import com.example.djicontroller.core.model.SimulatorStatus
 import com.example.djicontroller.core.model.StickAxes
 import com.example.djicontroller.core.model.StationCommand
 import com.example.djicontroller.core.model.StationLink
+import com.example.djicontroller.core.model.PowerAction
+import com.example.djicontroller.core.model.StationStatus
+import com.example.djicontroller.core.model.toStatus
 import com.example.djicontroller.core.model.VideoFrame
 import com.example.djicontroller.core.model.VirtualStickStatus
 import com.example.djicontroller.core.model.VisionFrameResult
 import com.example.djicontroller.core.model.VisionStats
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 
 /*
  * Porty, przez które logika z :core rozmawia z platformą. Implementacje produkcyjne są
@@ -113,6 +118,19 @@ interface StationPort {
 
     /** Wysyła polecenie i czeka na `ack` (z ponowieniami); [CommandResult.Failure] po wyczerpaniu prób. */
     suspend fun send(command: StationCommand): CommandResult
+
+    /**
+     * Status stacji razem ze stanem łącza (`charging`, `dronePresent`, `padClear`, `ready`, `isConnected`) —
+     * kontrakt pod F5. Domyślnie wyliczany z [link]; implementacja WebSocket z :station może go nadpisać.
+     */
+    val statusUpdates: Flow<StationStatus>
+        get() = link.map { it.toStatus() }
+
+    /** Popychacz przycisku zasilania drona (sekwencję naciśnięć wykonuje firmware stacji, R2). */
+    suspend fun triggerPowerButton(action: PowerAction): CommandResult = send(StationCommand.PowerButton(action))
+
+    /** Ładowanie pola stacji; włączać wolno tylko przy wyłączonym dronie (R1). */
+    suspend fun setCharging(enabled: Boolean): CommandResult = send(StationCommand.Charge(enabled))
 }
 
 /** Kamera i gimbal (sekcja 5.4). */
@@ -182,4 +200,17 @@ interface Clock {
 object SystemClock : Clock {
     override fun wallMs(): Long = System.currentTimeMillis()
     override fun monotonicMs(): Long = System.nanoTime() / 1_000_000L
+}
+
+/**
+ * Odmierzanie czasu w pętlach sterowania (np. 20 Hz w lądowaniu). W aplikacji [CoroutineTicker] (`delay`);
+ * w testach JVM — czas wirtualny: test przesuwa zegar i krok symulacji, więc minuty lotu trwają milisekundy.
+ * Pętla, która czeka przez [Ticker], musi mierzyć czas tym samym [Clock], który test przesuwa.
+ */
+fun interface Ticker {
+    suspend fun sleep(ms: Long)
+}
+
+object CoroutineTicker : Ticker {
+    override suspend fun sleep(ms: Long) = delay(ms)
 }

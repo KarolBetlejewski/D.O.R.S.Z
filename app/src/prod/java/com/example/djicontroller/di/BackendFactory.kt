@@ -3,7 +3,6 @@ package com.example.djicontroller.di
 import android.content.Context
 import android.view.Surface
 import com.example.djicontroller.core.control.ControlArbiter
-import com.example.djicontroller.core.landing.LandingProcedure
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.Clock
@@ -65,7 +64,6 @@ private class DjiBackend(
     override val mission: MissionPort = missionPort
     override val simulator: SimulatorPort = SimulatorAdapter(sdk, scope, keyRepository, logger)
     override val station: StationPort = UnavailableStation()
-    override val landing: LandingProcedure = UnavailableLanding()
     override val defaultRoute: PatrolRoute? = null
     override val debugActions: List<DebugAction> = emptyList()
 

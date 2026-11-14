@@ -10,36 +10,49 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.hypot
-import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.tan
 
 /**
- * Wizja dla testów JVM bez OpenCV: położenie stacji liczone z geometrii symulatora i podawane
- * do [FakeVision] tak, jak robi to potok :vision (~12 Hz, opóźnienie 80 ms). Marker „widać”,
- * gdy gimbal patrzy w dół, stacja jest w polu widzenia (FOV ≈ 74°) i marker nie jest zasłonięty.
+ * Detekcja markera liczona geometrycznie z pozycji symulatora — dla testów JVM, w których
+ * nie ma natywnego OpenCV. W aplikacji demo te same klatki przechodzą przez prawdziwy detektor z :vision.
+ *
+ * Publikuje wynik co [intervalMs], tylko gdy ktoś korzysta z detekcji (jak `VisionPipeline`):
+ * marker widoczny przy gimbalu w dół, w polu widzenia kamery i do 14 m wysokości.
  */
-fun CoroutineScope.feedMarkerFromSimulator(sim: DroneSimulator, vision: FakeVision, clock: Clock): Job = launch {
+fun CoroutineScope.feedMarkerFromSimulator(
+    sim: DroneSimulator,
+    vision: FakeVision,
+    clock: Clock,
+    intervalMs: Long = 80,
+): Job = launch {
     while (isActive) {
-        vision.publish(observe(sim, clock))
-        delay(80)
+        delay(intervalMs)
+        if (vision.users.value.isEmpty()) continue
+        val now = clock.monotonicMs()
+        vision.publish(observe(sim, now), frameTimestampMs = now)
     }
 }
 
-private fun observe(sim: DroneSimulator, clock: Clock): MarkerObservation? {
-    if (sim.markerHidden || !sim.poweredOn || sim.gimbalPitchDeg > -85.0) return null
-    val altitude = max(sim.currentAltitude, 0.05)
-    val (n, e) = sim.currentPosition.northEastTo(sim.station)
-    if (hypot(n, e) > altitude * 0.75 || altitude > 12.0 || altitude < 0.3) return null
+private fun observe(sim: DroneSimulator, now: Long): MarkerObservation? {
+    if (sim.gimbalPitchDeg > -85.0 || sim.markerHidden) return null
+    val altitude = sim.currentAltitude
+    if (altitude < 0.15 || altitude > 14.0) return null
+    val (n, e) = sim.currentPosition.northEastTo(sim.station) // od drona do środka płyty
+    if (hypot(n, e) > altitude * tan(Math.toRadians(FOV_HALF_DEG))) return null
     val h = Math.toRadians(sim.currentHeading)
-    val now = clock.monotonicMs()
+    var yaw = (0.0 - sim.currentHeading) % 360.0
+    if (yaw > 180) yaw -= 360
+    if (yaw <= -180) yaw += 360
     return MarkerObservation(
-        markerId = if (altitude > 2.0) 16 else 3,
+        markerId = if (altitude < 1.2) 3 else 16,
         dxM = n * cos(h) + e * sin(h),
         dyM = -n * sin(h) + e * cos(h),
         dzM = altitude,
-        // Płyta „góra” = północ: błąd kursu to −kurs drona (znormalizowany do ±180°).
-        yawDeg = ((-sim.currentHeading + 540.0) % 360.0) - 180.0,
-        timestampMs = now - 80,
-        latencyMs = 80,
+        yawDeg = yaw,
+        timestampMs = now,
+        latencyMs = 0,
     )
 }
+
+private const val FOV_HALF_DEG = 35.0

@@ -73,4 +73,42 @@ class PoseConversionTest {
         val b = PoseConversion.toBody(doubleArrayOf(0.3, -0.2, 4.0), identity, gimbalPitchDeg = -90.0)
         assertEquals(a, b)
     }
+
+    /** Rzut narożników markera (kamera w dół, model otworkowy) — dane wejściowe dla [PoseConversion.fromCorners]. */
+    private fun projectCorners(forward: Double, right: Double, height: Double, yawDeg: Double, size: Double): FloatArray {
+        val f = 640.0; val cx = 480.0; val cy = 270.0
+        val a = Math.toRadians(yawDeg)
+        val upF = cos(a); val upR = sin(a)          // oś „góra” markera w BODY
+        val rF = -sin(a); val rR = cos(a)           // oś „prawo” markera w BODY
+        val h = size / 2
+        val out = FloatArray(8)
+        // Kolejność ArUco: lewy górny, prawy górny, prawy dolny, lewy dolny.
+        val signs = listOf(-1.0 to 1.0, 1.0 to 1.0, 1.0 to -1.0, -1.0 to -1.0)
+        for ((k, s) in signs.withIndex()) {
+            val pf = forward + s.first * h * rF + s.second * h * upF
+            val pr = right + s.first * h * rR + s.second * h * upR
+            // BODY → kamera (w dół): x = prawo, y = −przód, z = wysokość.
+            out[2 * k] = (f * pr / height + cx).toFloat()
+            out[2 * k + 1] = (f * -pf / height + cy).toFloat()
+        }
+        return out
+    }
+
+    @Test
+    fun `poza zgrubna z narozników - polozenie, wysokosc i kurs`() {
+        for ((case, yaw) in listOf(Triple(1.0, -0.5, 6.0) to 30.0, Triple(-0.3, 0.8, 2.0) to -120.0, Triple(0.0, 0.0, 0.6) to 0.0)) {
+            val (fwd, right, h) = case
+            val c = projectCorners(fwd, right, h, yaw, size = 0.30)
+            val p = PoseConversion.fromCorners(c, 640.0, 640.0, 480.0, 270.0, 0.30)!!
+            assertEquals("przód $case", fwd, p.forwardM, 0.02 * h)
+            assertEquals("prawo $case", right, p.rightM, 0.02 * h)
+            assertEquals("wysokość $case", h, p.heightM, 0.05 * h)
+            assertEquals("kurs $case", yaw, p.yawDeg, 2.0)
+        }
+    }
+
+    @Test
+    fun `poza zgrubna - zdegenerowane narozniki daja null`() {
+        assertEquals(null, PoseConversion.fromCorners(FloatArray(8) { 100f }, 640.0, 640.0, 480.0, 270.0, 0.30))
+    }
 }

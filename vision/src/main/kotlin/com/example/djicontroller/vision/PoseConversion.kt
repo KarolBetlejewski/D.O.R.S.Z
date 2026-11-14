@@ -2,6 +2,7 @@ package com.example.djicontroller.vision
 
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 /** Położenie środka lądowiska względem drona w układzie BODY (patrz `MarkerObservation`). */
@@ -53,5 +54,58 @@ object PoseConversion {
         val yaw = Math.toDegrees(atan2(upRight, upFwd))
 
         return BodyPose(forwardM = forward, rightM = right, heightM = height, yawDeg = yaw)
+    }
+
+    /**
+     * Poza zgrubna z samych narożników markera — gdy `solvePnP` daje zbyt duży błąd reprojekcji
+     * (mały marker w obrazie, kilka pikseli na pole: narożniki są zaszumione, ale ID jest zdekodowane).
+     *
+     * Środek markera to średnia narożników (kierunek do markera nie zależy od dokładności pojedynczego
+     * narożnika), odległość z rozmiaru: `z = f · bok_m / bok_px`, oś „góra” markera z krawędzi lewej i prawej.
+     * Zakłada kamerę patrzącą prawie pionowo w dół (lądowanie); dalej jak [toBody].
+     *
+     * @param corners 8 współrzędnych pikseli w kolejności ArUco: lewy górny, prawy górny, prawy dolny, lewy dolny
+     * @return `null`, gdy narożniki są zdegenerowane
+     */
+    fun fromCorners(
+        corners: FloatArray,
+        fx: Double,
+        fy: Double,
+        cx: Double,
+        cy: Double,
+        markerSizeM: Double,
+        padOffsetRightM: Double = 0.0,
+        padOffsetUpM: Double = 0.0,
+        gimbalPitchDeg: Double? = null,
+    ): BodyPose? {
+        require(corners.size == 8) { "4 narożniki" }
+        fun x(k: Int) = corners[2 * k].toDouble()
+        fun y(k: Int) = corners[2 * k + 1].toDouble()
+        var side = 0.0
+        for (k in 0 until 4) side += hypot(x((k + 1) % 4) - x(k), y((k + 1) % 4) - y(k))
+        side /= 4
+        if (!side.isFinite() || side < 2.0 || markerSizeM <= 0) return null
+
+        val u = (x(0) + x(1) + x(2) + x(3)) / 4
+        val v = (y(0) + y(1) + y(2) + y(3)) / 4
+        val z = (fx + fy) / 2 * markerSizeM / side
+        val t = doubleArrayOf((u - cx) / fx * z, (v - cy) / fy * z, z)
+
+        // Oś „prawo” markera: lewy→prawy narożnik (górna i dolna krawędź); oś „góra”: dolny→górny.
+        var rx = (x(1) - x(0)) + (x(2) - x(3))
+        var ry = (y(1) - y(0)) + (y(2) - y(3))
+        var ux = (x(0) - x(3)) + (x(1) - x(2))
+        var uy = (y(0) - y(3)) + (y(1) - y(2))
+        val rn = hypot(rx, ry)
+        val un = hypot(ux, uy)
+        if (rn < 1e-9 || un < 1e-9) return null
+        rx /= rn; ry /= rn; ux /= un; uy /= un
+        // Marker na ziemi, kamera w dół: osie markera leżą w płaszczyźnie obrazu, normalna = −z kamery.
+        val rotation = doubleArrayOf(
+            rx, ux, 0.0,
+            ry, uy, 0.0,
+            0.0, 0.0, -1.0,
+        )
+        return toBody(t, rotation, padOffsetRightM, padOffsetUpM, gimbalPitchDeg)
     }
 }
