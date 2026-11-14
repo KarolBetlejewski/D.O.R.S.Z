@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Katalogi udostępniane przez LogFileProvider (logi lotów i zapisane klatki) — patrz FileFlightLogger. -->
+<paths>
+    <external-files-path name="flight_logs" path="flight-logs/" />
+    <external-files-path name="frames" path="frames/" />
+    <files-path name="flight_logs_internal" path="flight-logs/" />
+</paths>

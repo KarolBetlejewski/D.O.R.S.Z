@@ -3,6 +3,10 @@ package com.example.djicontroller.di
 import android.content.Context
 import com.example.djicontroller.core.control.ControlArbiter
 import com.example.djicontroller.core.landing.LandingPlanner
+import com.example.djicontroller.core.diagnostics.CompatibilityEvents
+import com.example.djicontroller.core.diagnostics.CompatibilityMonitor
+import com.example.djicontroller.core.diagnostics.PadLandingTest
+import com.example.djicontroller.core.diagnostics.PadOnlyStation
 import com.example.djicontroller.core.landing.LandingPlannerConfig
 import com.example.djicontroller.core.logging.CompositeFlightLogger
 import com.example.djicontroller.core.logging.TelemetryRecorder
@@ -54,7 +58,10 @@ class AppContainer(context: Context) {
     )
 
     val fileLogger = FileFlightLogger(context, clock, appScope)
-    val logger: FlightLogger = CompositeFlightLogger(listOf(fileLogger, LogcatFlightLogger()))
+
+    /** Nasłuch błędów kluczy i wyników poleceń do raportu zgodności F0 — wpięty w logger przed backendem. */
+    val compatibilityEvents = CompatibilityEvents()
+    val logger: FlightLogger = CompositeFlightLogger(listOf(fileLogger, LogcatFlightLogger(), compatibilityEvents))
 
     val arbiter = ControlArbiter(logger)
 
@@ -114,6 +121,36 @@ class AppContainer(context: Context) {
     )
     val hoverTest = MarkerHoverTest(flightTests, backend.flight, backend.camera, vision, backend.telemetry, logger, clock)
     val axisCheck = StickAxisCheck(flightTests, backend.flight, backend.telemetry, logger, clock)
+
+    // --- Testy polowe etapu B: R5 bez stacji i raport zgodności z Mini 4 Pro (F0)
+    /**
+     * Lądowanie precyzyjne na samej płycie: ten sam planer L1–L5, ale stacja zastępcza
+     * (płyta zawsze wolna) i położenie płyty = punkt startu — dron startuje z płyty.
+     */
+    private val padLandingPlanner: LandingPlanner = LandingPlanner(
+        flight = backend.flight,
+        mission = backend.mission,
+        camera = backend.camera,
+        vision = vision,
+        telemetry = backend.telemetry,
+        station = PadOnlyStation(appScope, backend.telemetry, clock),
+        stationLocation = { backend.telemetry.state.value.homeLocation },
+        logger = logger,
+        clock = clock,
+        config = LandingPlannerConfig(maxAttempts = CYCLE_MAX_LANDING_ATTEMPTS),
+    )
+    val padLandingTest = PadLandingTest(flightTests, padLandingPlanner, logger, clock)
+
+    val compatibility = CompatibilityMonitor(
+        scope = appScope,
+        connection = backend.connection,
+        telemetry = backend.telemetry,
+        flight = backend.flight,
+        camera = backend.camera,
+        visionResults = vision.results,
+        events = compatibilityEvents,
+        isCameraSource = { it.source == VisionPipeline.CAMERA_SOURCE },
+    )
 
     private fun loadCalibration(): CameraCalibration {
         CameraCalibration.load(calibrationFile)

@@ -75,6 +75,17 @@
                 android:resource="@xml/accessory_filter" />
         </activity>
 
+        <!-- Udostępnianie logów lotu z Diagnostyki (poczta, Dysk) bez kabla — LogSharing.kt -->
+        <provider
+            android:name=".logging.LogFileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/log_paths" />
+        </provider>
+
         <service
             android:name=".service.PatrolService"
             android:exported="false"

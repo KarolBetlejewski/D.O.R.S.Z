@@ -4,6 +4,7 @@ import android.app.Application
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.ConnectionPort
+import com.example.djicontroller.core.port.DroneSettingsPort
 import com.example.djicontroller.core.port.FlightControlPort
 import com.example.djicontroller.core.port.MissionPort
 import com.example.djicontroller.core.port.SimulatorPort
@@ -33,6 +34,9 @@ interface DroneBackend {
 
     /** Symulator MSDK (test R3 bez śmigieł); `null` w `demo`, gdzie cały dron jest symulowany. */
     val simulator: SimulatorPort?
+
+    /** Ustawienia drona przed lotem (akcja failsafe); `null`, gdy wariant ich nie obsługuje. */
+    val settings: DroneSettingsPort? get() = null
 
     /** Trasa dostępna bez ekranu planowania (F4). W `prod` brak, w `demo` przykładowa. */
     val defaultRoute: PatrolRoute?

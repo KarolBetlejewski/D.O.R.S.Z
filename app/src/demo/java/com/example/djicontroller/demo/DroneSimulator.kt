@@ -41,8 +41,13 @@ class DroneSimulator(
     private val logger: FlightLogger,
     val station: GeoPoint,
     val timeScale: Double = 3.0,
-    /** Zużycie baterii w locie, %/s czasu symulowanego. */
-    private val drainPercentPerSecond: Double = 0.3,
+    /**
+     * Zużycie baterii w locie, %/s czasu symulowanego. 0,06 %/s ≈ Mini 4 Pro (ok. 30 min lotu) i zgadza się
+     * z założeniem [com.example.djicontroller.core.orchestrator.BatteryPolicyConfig] (~10 %/km przy 6 m/s).
+     * Przy szybszym zużyciu powrót z progu kończy się poniżej poziomu krytycznego, czyli lądowaniem awaryjnym.
+     * Powrót z progu wywołuje się w demo przyciskiem „Bateria −20%”.
+     */
+    private val drainPercentPerSecond: Double = 0.06,
 ) {
     private val _state = MutableStateFlow(DroneState.UNKNOWN)
     val state: StateFlow<DroneState> = _state.asStateFlow()
@@ -132,6 +137,9 @@ class DroneSimulator(
             isFailSafe = false,
             failsafeAction = FailsafeAction.GO_HOME,
             isLandingConfirmationNeeded = false,
+            goHomeHeightM = 30,
+            heightLimitM = 120,
+            firmwareVersion = "symulacja",
             updatedAtMs = clock.monotonicMs(),
         )
         publishBattery()
@@ -313,6 +321,9 @@ class DroneSimulator(
     }
 
     fun setFlightMode(mode: String) = _state.update { it.copy(flightMode = mode) }
+
+    /** Ustawienie akcji failsafe z Diagnostyki (odpowiednik `KeyFailsafeAction` w wariancie prod). */
+    fun setFailsafeAction(action: FailsafeAction) = _state.update { it.copy(failsafeAction = action) }
 
     /** Odpowiedź na ochronę lądowania (`KeyConfirmLanding`). */
     fun confirmLanding() {

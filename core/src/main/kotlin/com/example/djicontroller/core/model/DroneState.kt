@@ -45,6 +45,12 @@ data class DroneState(
     val failsafeAction: FailsafeAction? = null,
     /** `FlightControllerKey.KeyIsLandingConfirmationNeeded` — ochrona lądowania czeka na potwierdzenie. */
     val isLandingConfirmationNeeded: Boolean? = null,
+    /** `KeyGoHomeHeight` — wysokość powrotu RTH względem startu, m. */
+    val goHomeHeightM: Int? = null,
+    /** `KeyHeightLimit` — limit wysokości ustawiony w dronie, m. */
+    val heightLimitM: Int? = null,
+    /** `ProductKey.KeyFirmwareVersion` — wersja oprogramowania drona (do raportu zgodności F0). */
+    val firmwareVersion: String? = null,
     /** Czas monotoniczny ostatniej aktualizacji dowolnego pola, ms ([com.example.djicontroller.core.port.Clock.monotonicMs]). */
     val updatedAtMs: Long = 0L,
 ) {

@@ -16,8 +16,11 @@ import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.KeyTools
+import dji.sdk.keyvalue.key.ProductKey
 import dji.sdk.keyvalue.value.common.LocationCoordinate2D
 import dji.sdk.keyvalue.value.flightcontroller.GPSSignalLevel
+import dji.v5.et.create
+import dji.v5.et.get
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +55,7 @@ class KeyRepository(
     override val state: StateFlow<DroneState> = _state.asStateFlow()
 
     private val started = AtomicBoolean(false)
+    private val firmwareRequested = AtomicBoolean(false)
 
     /** Rozpoczyna nasłuch wszystkich kluczy. Nasłuch ruszy faktycznie po `INITIALIZE_COMPLETE`. */
     fun start() {
@@ -59,7 +63,10 @@ class KeyRepository(
 
         // KeyConnection: false przy utracie łącza z kontrolerem lotu — jedyne pole, dla którego null = rozłączony.
         sdk.whenInitialized { KeyTools.createKey(FlightControllerKey.KeyConnection).asFlow() }
-            .onEach { v -> mutate("KeyConnection") { it.copy(connected = v == true) } }
+            .onEach { v ->
+                mutate("KeyConnection") { it.copy(connected = v == true) }
+                if (v == true && firmwareRequested.compareAndSet(false, true)) readFirmwareVersion()
+            }
             .catch { logKeyError("KeyConnection", it) }
             .launchIn(scope)
 
@@ -111,7 +118,31 @@ class KeyRepository(
         bind({ KeyTools.createKey(FlightControllerKey.KeyIsLandingConfirmationNeeded) }, "KeyIsLandingConfirmationNeeded") { s, v ->
             s.copy(isLandingConfirmationNeeded = v)
         }
-        logger.system("telemetry_bound", fields = mapOf("keys" to 17))
+        bind({ KeyTools.createKey(FlightControllerKey.KeyGoHomeHeight) }, "KeyGoHomeHeight") { s, v ->
+            s.copy(goHomeHeightM = v)
+        }
+        bind({ KeyTools.createKey(FlightControllerKey.KeyHeightLimit) }, "KeyHeightLimit") { s, v ->
+            s.copy(heightLimitM = v)
+        }
+        logger.system("telemetry_bound", fields = mapOf("keys" to 20))
+    }
+
+    /**
+     * Wersja firmware drona do raportu zgodności (F0). `KeyFirmwareVersion` nie obsługuje nasłuchu —
+     * jednorazowy odczyt po połączeniu, jak w `MSDKInfoVm` z przykładu DJI.
+     */
+    private fun readFirmwareVersion() {
+        try {
+            ProductKey.KeyFirmwareVersion.create().get({ version ->
+                if (!version.isNullOrBlank()) mutate("KeyFirmwareVersion") { it.copy(firmwareVersion = version) }
+            }) { error ->
+                firmwareRequested.set(false) // spróbujemy przy następnym połączeniu
+                logger.system("telemetry_key_failed", LogLevel.ERROR, mapOf("key" to "KeyFirmwareVersion", "error" to error.toString()))
+            }
+        } catch (e: RuntimeException) {
+            firmwareRequested.set(false)
+            logKeyError("KeyFirmwareVersion", e)
+        }
     }
 
     /** Nasłuch jednego klucza; wartości `null` są pomijane (zachowujemy ostatnią znaną). */

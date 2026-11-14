@@ -6,7 +6,11 @@ import com.example.djicontroller.core.model.GeoPoint
 import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.model.PatrolWaypoint
 import com.example.djicontroller.core.model.StickAxes
+import com.example.djicontroller.core.logging.command
+import com.example.djicontroller.core.model.CommandResult
+import com.example.djicontroller.core.model.FailsafeAction
 import com.example.djicontroller.core.port.Clock
+import com.example.djicontroller.core.port.DroneSettingsPort
 import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.port.SimulatorPort
 import com.example.djicontroller.demo.DroneSimulator
@@ -80,6 +84,15 @@ class SimulatedBackend(
 
     /** W demo cały dron jest symulowany — symulator MSDK nie ma tu zastosowania. */
     override val simulator: SimulatorPort? = null
+
+    /** Akcja failsafe zmieniana w symulowanym dronie — żeby kartę „Lot testowy” dało się sprawdzić w demo. */
+    override val settings: DroneSettingsPort = object : DroneSettingsPort {
+        override suspend fun setFailsafeAction(action: FailsafeAction): CommandResult {
+            drone.setFailsafeAction(action)
+            logger.command("failsafe_set", CommandResult.Success, mapOf("action" to action.name))
+            return CommandResult.Success
+        }
+    }
 
     override val debugActions: List<DebugAction> = listOf(
         DebugAction("Bateria −20%") { drone.drainBattery(20) },

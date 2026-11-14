@@ -7,6 +7,7 @@ import com.example.djicontroller.core.model.PatrolRoute
 import com.example.djicontroller.core.port.CameraPort
 import com.example.djicontroller.core.port.Clock
 import com.example.djicontroller.core.port.ConnectionPort
+import com.example.djicontroller.core.port.DroneSettingsPort
 import com.example.djicontroller.core.port.FlightControlPort
 import com.example.djicontroller.core.port.FlightLogger
 import com.example.djicontroller.core.model.StickAxes
@@ -19,6 +20,7 @@ import com.example.djicontroller.msdk.camera.CameraAdapter
 import com.example.djicontroller.msdk.connection.DroneConnection
 import com.example.djicontroller.msdk.connection.SdkInitializer
 import com.example.djicontroller.msdk.flight.FlightControl
+import com.example.djicontroller.msdk.flight.FlightSettings
 import com.example.djicontroller.msdk.flight.SimulatorAdapter
 import com.example.djicontroller.msdk.telemetry.KeyRepository
 import com.example.djicontroller.ui.VideoPreview
@@ -63,6 +65,7 @@ private class DjiBackend(
         FlightControl(sdk, scope, arbiter, keyRepository, missionPort, logger, initialAxes = stickAxes)
     override val mission: MissionPort = missionPort
     override val simulator: SimulatorPort = SimulatorAdapter(sdk, scope, keyRepository, logger)
+    override val settings: DroneSettingsPort = FlightSettings(sdk, logger)
     override val station: StationPort = UnavailableStation()
     override val defaultRoute: PatrolRoute? = null
     override val debugActions: List<DebugAction> = emptyList()

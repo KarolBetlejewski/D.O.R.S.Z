@@ -5,6 +5,7 @@ import com.example.djicontroller.core.model.ConnectionState
 import com.example.djicontroller.core.model.ControlLoss
 import com.example.djicontroller.core.model.ControlOwner
 import com.example.djicontroller.core.model.DroneState
+import com.example.djicontroller.core.model.FailsafeAction
 import com.example.djicontroller.core.model.GeoPoint
 import com.example.djicontroller.core.model.MarkerObservation
 import com.example.djicontroller.core.model.MissionPlan
@@ -110,6 +111,12 @@ interface MissionPort {
 
     /** Przerywa misję; dron zawisa. Zwalnia właściciela [ControlOwner.MISSION]. */
     suspend fun stop(): CommandResult
+}
+
+/** Ustawienia drona zmieniane z aplikacji przed lotem (sekcja 5.8: zachowanie po utracie łącza). */
+interface DroneSettingsPort {
+    /** `KeyFailsafeAction` — co dron robi po utracie łącza z aparaturą; dla patrolu: [FailsafeAction.GO_HOME]. */
+    suspend fun setFailsafeAction(action: FailsafeAction): CommandResult
 }
 
 /** Łącze ze stacją przez Wi-Fi (sekcja 5.7). */

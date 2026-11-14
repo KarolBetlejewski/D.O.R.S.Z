@@ -57,10 +57,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.djicontroller.core.diagnostics.AxisCheckState
 import com.example.djicontroller.core.diagnostics.AxisVerdict
+import com.example.djicontroller.core.diagnostics.CheckState
+import com.example.djicontroller.core.diagnostics.PadLandingState
+import com.example.djicontroller.core.diagnostics.PadLandingTest
 import com.example.djicontroller.core.diagnostics.HoverTestState
 import com.example.djicontroller.core.diagnostics.MarkerHoverTest
 import com.example.djicontroller.core.diagnostics.StickAxisCheck
 import com.example.djicontroller.core.model.ConnectionState
+import com.example.djicontroller.core.model.FailsafeAction
 import com.example.djicontroller.core.model.Setpoint
 import com.example.djicontroller.core.model.StickAxes
 import com.example.djicontroller.core.model.isAirborneStage
@@ -69,8 +73,9 @@ import com.example.djicontroller.vision.LandingPadLayout
 import java.util.Locale
 
 /**
- * Ekran Diagnostyka (F2): symulator MSDK, gimbal, wizja ArUco z nakładką, Virtual Stick (test osi),
- * lot testowy (start, lądowanie z ochroną — R5) i test R3 „Zawis nad markerem”. STOP zawsze widoczny.
+ * Ekran Diagnostyka — narzędzia testów polowych: raport zgodności z Mini 4 Pro (F0), zawis nad markerem (R3),
+ * lądowanie precyzyjne na płycie bez stacji (R5), wizja ArUco (R4), Virtual Stick (test osi), lot testowy
+ * z kontrolą failsafe, gimbal, symulator MSDK, udostępnianie logów. STOP zawsze widoczny.
  */
 @Composable
 fun DiagnosticsScreen(onBack: () -> Unit, vm: DiagnosticsViewModel = viewModel()) {
@@ -83,7 +88,7 @@ fun DiagnosticsScreen(onBack: () -> Unit, vm: DiagnosticsViewModel = viewModel()
 
     Box(Modifier.fillMaxSize().background(PatrolColors.Background)) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
-            Header(state, onBack)
+            Header(state, onBack, onShareLogs = vm::shareLogs)
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(
@@ -113,7 +118,9 @@ fun DiagnosticsScreen(onBack: () -> Unit, vm: DiagnosticsViewModel = viewModel()
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    CompatibilityCard(state, vm)
                     HoverCard(state, vm)
+                    PadLandingCard(state, vm)
                     VisionCard(state, vm, onPickImage = { pickImage.launch(arrayOf("image/*")) }, onPickVideo = { pickVideo.launch(arrayOf("video/*")) })
                     VirtualStickCard(state, vm)
                     FlightCard(state, vm)
@@ -130,12 +137,13 @@ fun DiagnosticsScreen(onBack: () -> Unit, vm: DiagnosticsViewModel = viewModel()
 }
 
 @Composable
-private fun Header(state: DiagnosticsUiState, onBack: () -> Unit) {
+private fun Header(state: DiagnosticsUiState, onBack: () -> Unit, onShareLogs: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
             Text("← Ekran główny", fontSize = 12.sp)
         }
-        Text("Diagnostyka F2", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Diagnostyka", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        SmallButton("Udostępnij logi", onShareLogs)
         val conn = when (val c = state.connection) {
             is ConnectionState.Connected -> if (c.supported) "Mini 4 Pro" else c.productType
             ConnectionState.Disconnected -> "brak drona"
@@ -315,6 +323,97 @@ private fun FlightCard(state: DiagnosticsUiState, vm: DiagnosticsViewModel) {
             Text("Dron czeka na potwierdzenie lądowania", color = PatrolColors.Warn, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             ActionButton("Potwierdź lądowanie", PatrolColors.Warn, vm::confirmLanding)
         }
+        // Kontrola przed lotem (sekcja 5.8): po utracie łącza dron ma wracać do punktu startu.
+        val failsafe = d.failsafeAction
+        val failsafeOk = failsafe == FailsafeAction.GO_HOME
+        Text(
+            "Failsafe: ${failsafe?.name ?: "—"}${if (failsafeOk) " ✓" else "  ⚠ zalecane GO_HOME"}",
+            color = if (failsafeOk) PatrolColors.Ok else PatrolColors.Warn,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Mono("RTH ${d.goHomeHeightM?.let { "$it m" } ?: "—"} · limit wys. ${d.heightLimitM?.let { "$it m" } ?: "—"}")
+        if (!failsafeOk && state.settingsAvailable && failsafe != null) {
+            SmallButton("Ustaw: powrót do domu", vm::setFailsafeGoHome)
+        }
+        Muted("Wysokość RTH ustaw w DJI Fly ponad przeszkody w okolicy (drzewa, budynki).")
+    }
+}
+
+// ---------------------------------------------------------------- F0: zgodność z Mini 4 Pro
+
+@Composable
+private fun CompatibilityCard(state: DiagnosticsUiState, vm: DiagnosticsViewModel) {
+    Card("Zgodność z Mini 4 Pro (F0)") {
+        val checks = state.compatibility
+        val ok = checks.count { it.state == CheckState.OK }
+        val failed = checks.count { it.state == CheckState.FAILED }
+        val waiting = checks.size - ok - failed
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("✓ $ok", color = PatrolColors.Ok, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("… $waiting", color = PatrolColors.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("✕ $failed", color = if (failed > 0) PatrolColors.Stop else PatrolColors.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Muted("z ${checks.size}")
+        }
+        var expanded by rememberSaveable { mutableStateOf(false) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SmallButton(if (expanded) "Zwiń listę" else "Pokaż listę", { expanded = !expanded })
+            SmallButton("Zapisz raport do logu", vm::saveCompatibilityReport)
+            SmallButton("Udostępnij raport", vm::shareCompatibilityReport)
+        }
+        // Błędy zawsze widoczne; pełna lista po rozwinięciu.
+        val shown = if (expanded) checks else checks.filter { it.state == CheckState.FAILED }
+        var lastGroup: String? = null
+        shown.forEach { c ->
+            if (expanded && c.group != lastGroup) {
+                lastGroup = c.group
+                Text(c.group, color = PatrolColors.Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+            val (mark, color) = when (c.state) {
+                CheckState.OK -> "✓" to PatrolColors.Ok
+                CheckState.WAITING -> "…" to PatrolColors.TextMuted
+                CheckState.FAILED -> "✕" to PatrolColors.Stop
+            }
+            Text(
+                "$mark ${c.label}${c.value?.let { ": $it" } ?: ""}",
+                color = color,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            c.note?.let { Muted("   $it") }
+        }
+        Muted("Lista uzupełnia się sama po połączeniu; polecenia (start, lądowanie) — po pierwszym użyciu.")
+    }
+}
+
+// ---------------------------------------------------------------- R5 bez stacji
+
+@Composable
+private fun PadLandingCard(state: DiagnosticsUiState, vm: DiagnosticsViewModel) {
+    Card("Lądowanie precyzyjne na płycie (R5, bez stacji)") {
+        val running = state.runningTest == PadLandingTest.TEST_NAME
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (running) {
+                ActionButton("Przerwij", PatrolColors.Warn, vm::stopPadLanding)
+            } else {
+                ActionButton("Ląduj na płycie", PatrolColors.Ok, vm::startPadLanding, enabled = state.cycleIdle && state.runningTest == null)
+            }
+            state.padLandingPhase?.takeIf { running }?.let { Mono("próba ${it.attempt} · ${it.step.label}") }
+        }
+        Muted("Start z płyty z markerem (płyta = punkt startu), wznieś się na 4–8 m. Pełne L2–L5 jak w cyklu, bez stacji.")
+        when (val p = state.padLanding) {
+            PadLandingState.Idle -> Unit
+            is PadLandingState.Running -> if (!running) Mono("próba ${p.attempt}") else Unit
+            is PadLandingState.Finished -> {
+                Text(
+                    p.reason,
+                    color = if (p.success) PatrolColors.Ok else PatrolColors.Warn,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (p.attempts > 0) Mono("prób ${p.attempts} · czas ${p.durationMs / 1000} s")
+            }
+        }
     }
 }
 
@@ -437,6 +536,7 @@ private fun videoFooter(state: DiagnosticsUiState): String {
 private fun testName(name: String) = when (name) {
     MarkerHoverTest.TEST_NAME -> "zawis nad markerem"
     StickAxisCheck.TEST_NAME -> "osie Virtual Stick"
+    PadLandingTest.TEST_NAME -> "lądowanie na płycie"
     else -> name
 }
 

@@ -8,13 +8,17 @@ import androidx.lifecycle.viewModelScope
 import com.example.djicontroller.appContainer
 import com.example.djicontroller.core.diagnostics.AxisCheckState
 import com.example.djicontroller.core.diagnostics.AxisVerdict
+import com.example.djicontroller.core.diagnostics.CompatibilityCheck
 import com.example.djicontroller.core.diagnostics.HoverTestState
+import com.example.djicontroller.core.diagnostics.PadLandingState
+import com.example.djicontroller.core.landing.LandingPhase
 import com.example.djicontroller.core.logging.command
 import com.example.djicontroller.core.logging.system
 import com.example.djicontroller.core.model.CommandResult
 import com.example.djicontroller.core.model.ConnectionState
 import com.example.djicontroller.core.model.CycleState
 import com.example.djicontroller.core.model.DroneState
+import com.example.djicontroller.core.model.FailsafeAction
 import com.example.djicontroller.core.model.GeoPoint
 import com.example.djicontroller.core.model.SimulatorStatus
 import com.example.djicontroller.core.model.StickAxes
@@ -22,6 +26,7 @@ import com.example.djicontroller.core.model.VirtualStickStatus
 import com.example.djicontroller.core.model.VisionFrameResult
 import com.example.djicontroller.core.model.VisionStats
 import com.example.djicontroller.core.port.LogLevel
+import com.example.djicontroller.logging.LogSharing
 import com.example.djicontroller.vision.CameraCalibration
 import com.example.djicontroller.vision.FrameSnapshot
 import com.example.djicontroller.vision.FrameSources
@@ -67,6 +72,13 @@ data class DiagnosticsUiState(
     val isSimulation: Boolean = false,
     val autoConfirmLanding: Boolean = true,
     val hoverHeightM: Double = 3.0,
+    /** Raport zgodności z Mini 4 Pro (F0). */
+    val compatibility: List<CompatibilityCheck> = emptyList(),
+    /** Test R5 bez stacji: lądowanie precyzyjne na płycie z punktu startu. */
+    val padLanding: PadLandingState = PadLandingState.Idle,
+    val padLandingPhase: LandingPhase? = null,
+    /** Czy wariant pozwala zmieniać ustawienia drona (akcja failsafe). */
+    val settingsAvailable: Boolean = false,
 ) {
     /** Testy i polecenia lotu tylko poza cyklem patrolu (Z2: orkiestrator nie steruje). */
     val cycleIdle: Boolean get() = cycle == CycleState.Ready || cycle is CycleState.Failure
@@ -111,14 +123,30 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         vision.calibration,
     ) { hover, axis, running, sim, calib -> TestsPart(hover, axis, running, sim, calib) }
 
+    private val partField = combine(
+        container.compatibility.checks,
+        container.padLandingTest.state,
+        container.padLandingTest.phase,
+    ) { checks, pad, phase -> FieldPart(checks, pad, phase) }
+
+    private val partMisc = combine(vision.problem, autoConfirm, hoverHeight, partField) { problem, confirm, height, field ->
+        MiscPart(problem, confirm, height, field)
+    }
+
     val state: StateFlow<DiagnosticsUiState> = combine(
         partFlight,
         partVision,
         partTests,
-        vision.problem,
-        combine(autoConfirm, hoverHeight) { a, h -> a to h },
-    ) { f, v, t, problem, (confirm, height) ->
+        partMisc,
+    ) { f, v, t, m ->
+        val problem = m.problem
+        val confirm = m.autoConfirm
+        val height = m.hoverHeight
         f.copy(
+            compatibility = m.field.checks,
+            padLanding = m.field.pad,
+            padLandingPhase = m.field.phase,
+            settingsAvailable = backend.settings != null,
             vision = v.result,
             visionStats = v.stats,
             visionOn = v.on,
@@ -142,6 +170,19 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         val on: Boolean,
         val source: String,
         val layout: LandingPadLayout,
+    )
+
+    private data class FieldPart(
+        val checks: List<CompatibilityCheck>,
+        val pad: PadLandingState,
+        val phase: LandingPhase?,
+    )
+
+    private data class MiscPart(
+        val problem: String?,
+        val autoConfirm: Boolean,
+        val hoverHeight: Double,
+        val field: FieldPart,
     )
 
     private data class TestsPart(
@@ -281,6 +322,64 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
     fun startHover() = report("Zawis nad markerem", container.hoverTest.start(hoverHeight.value))
     fun stopHover() = container.hoverTest.stop()
+
+    // ------------------------------------------------------------------ R5 bez stacji
+
+    fun startPadLanding() {
+        if (container.flightTests.running.value != null) {
+            _messages.tryEmit("Najpierw zakończ trwający test")
+            return
+        }
+        report("Lądowanie precyzyjne (test bez stacji)", container.padLandingTest.start())
+    }
+
+    fun stopPadLanding() = container.padLandingTest.stop()
+
+    // ------------------------------------------------------------------ failsafe
+
+    fun setFailsafeGoHome() {
+        val settings = backend.settings ?: return
+        launchCommand("Failsafe: powrót do domu") { settings.setFailsafeAction(FailsafeAction.GO_HOME) }
+    }
+
+    // ------------------------------------------------------------------ logi i raport F0
+
+    /** Udostępnia ostatnie logi lotu (bieżące uruchomienie i dwa poprzednie). */
+    fun shareLogs() {
+        val files = LogSharing.latestLogs(container.fileLogger.directory)
+        val ok = try {
+            LogSharing.shareFiles(getApplication<Application>(), files, "Logi lotu — ${timestamp()}")
+        } catch (e: RuntimeException) {
+            logger.system("log_share_failed", LogLevel.WARN, mapOf("error" to e.toString()))
+            _messages.tryEmit("Nie udało się udostępnić: ${e.message}")
+            return
+        }
+        if (!ok) _messages.tryEmit("Brak plików logu")
+    }
+
+    fun saveCompatibilityReport() {
+        val text = compatibilityReport()
+        logger.system("compatibility_report", fields = mapOf("text" to text))
+        _messages.tryEmit("Raport zgodności zapisany w logu")
+    }
+
+    fun shareCompatibilityReport() {
+        val text = compatibilityReport()
+        logger.system("compatibility_report", fields = mapOf("text" to text))
+        try {
+            LogSharing.shareText(getApplication<Application>(), "Raport zgodności Mini 4 Pro — ${timestamp()}", text)
+        } catch (e: RuntimeException) {
+            _messages.tryEmit("Nie udało się udostępnić: ${e.message}")
+        }
+    }
+
+    private fun compatibilityReport(): String {
+        val conn = container.connection.state.value
+        val product = (conn as? ConnectionState.Connected)?.productType ?: "brak połączenia"
+        return container.compatibility.report("Data: ${timestamp()} · wariant: ${backend.name} · produkt: $product")
+    }
+
+    private fun timestamp(): String = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
 
     // ------------------------------------------------------------------ pomocnicze
 
